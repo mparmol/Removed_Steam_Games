@@ -243,6 +243,7 @@ private fun Marca(texto: String, color: androidx.compose.ui.graphics.Color) {
 @Composable
 private fun Detalle(ev: Evento, lotengo: Boolean, lodeseo: Boolean, alCerrar: () -> Unit) {
     val ctx = LocalContext.current
+    val ambito = rememberCoroutineScope()
     fun abrir(url: String) = ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 
     AlertDialog(
@@ -250,7 +251,15 @@ private fun Detalle(ev: Evento, lotengo: Boolean, lodeseo: Boolean, alCerrar: ()
         title = { Text(ev.titulo) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (lotengo) Text("Ya la tienes en tu biblioteca", color = MaterialTheme.colorScheme.primary)
+                // Steam no reporta bien los free-to-play sin jugar, asi que se puede
+                // corregir a mano y la correccion manda sobre la API.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = lotengo,
+                        onCheckedChange = { v -> ambito.launch { Biblioteca.marcarPoseido(ctx, ev.appid, v) } },
+                    )
+                    Text(if (lotengo) "La tienes" else "No la tienes")
+                }
                 if (lodeseo) Text("Está en tu lista de deseados", color = MaterialTheme.colorScheme.primary)
                 Text("${Tipos.etiqueta(ev.tipo)} · ${Tipos.etiquetaContenido(ev.app_type)}")
                 ev.detalle?.takeIf { it.isNotBlank() }?.let {

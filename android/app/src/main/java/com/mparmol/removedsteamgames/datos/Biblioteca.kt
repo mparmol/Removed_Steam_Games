@@ -28,14 +28,37 @@ object Biblioteca {
     private val DESEADOS = stringSetPreferencesKey("appids_deseados")
     private val SINCRONIZADO = stringPreferencesKey("sincronizado")
 
+    // Correcciones a mano, por encima de lo que diga la API.
+    // Steam no siempre reporta bien los free-to-play, asi que hace falta una salida
+    // manual en vez de depender de que la API acierte siempre.
+    private val MARCADOS = stringSetPreferencesKey("appids_marcados")
+    private val DESMARCADOS = stringSetPreferencesKey("appids_desmarcados")
+
     data class Config(val clave: String, val steamId: String, val sincronizado: String?)
 
     fun config(ctx: Context): Flow<Config> = ctx.ajustes.data.map {
         Config(it[CLAVE].orEmpty(), it[STEAMID].orEmpty(), it[SINCRONIZADO])
     }
 
-    fun poseidos(ctx: Context): Flow<Set<Int>> =
-        ctx.ajustes.data.map { p -> p[POSEIDOS].orEmpty().mapNotNull { it.toIntOrNull() }.toSet() }
+    /** Lo que la API dice que tienes, mas tus correcciones manuales. */
+    fun poseidos(ctx: Context): Flow<Set<Int>> = ctx.ajustes.data.map { p ->
+        val api = p[POSEIDOS].orEmpty().mapNotNull { it.toIntOrNull() }
+        val mas = p[MARCADOS].orEmpty().mapNotNull { it.toIntOrNull() }
+        val menos = p[DESMARCADOS].orEmpty().mapNotNull { it.toIntOrNull() }.toSet()
+        (api + mas).toSet() - menos
+    }
+
+    /** Corrige a mano si la tienes o no, ganando siempre a lo que diga la API. */
+    suspend fun marcarPoseido(ctx: Context, appid: Int, tengo: Boolean) {
+        ctx.ajustes.edit { p ->
+            val mas = p[MARCADOS].orEmpty().toMutableSet()
+            val menos = p[DESMARCADOS].orEmpty().toMutableSet()
+            if (tengo) { mas += appid.toString(); menos -= appid.toString() }
+            else { menos += appid.toString(); mas -= appid.toString() }
+            p[MARCADOS] = mas
+            p[DESMARCADOS] = menos
+        }
+    }
 
     fun deseados(ctx: Context): Flow<Set<Int>> =
         ctx.ajustes.data.map { p -> p[DESEADOS].orEmpty().mapNotNull { it.toIntOrNull() }.toSet() }
@@ -81,9 +104,13 @@ object Biblioteca {
         try {
             val steamId = resolverId(clave, entradaId)
 
+            // include_played_free_games solo trae los F2P que se HAN JUGADO: un juego
+            // gratis reclamado y nunca abierto no aparece. include_free_sub anade las
+            // licencias gratuitas, que es como se poseen los free-to-play.
             val juegos = leer(
                 "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/" +
-                    "?key=$clave&steamid=$steamId&include_played_free_games=1&format=json",
+                    "?key=$clave&steamid=$steamId&include_played_free_games=1" +
+                    "&include_free_sub=1&skip_unvetted_apps=0&format=json",
             ).getJSONObject("response")
 
             if (!juegos.has("games")) {
