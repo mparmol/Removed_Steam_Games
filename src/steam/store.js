@@ -75,6 +75,11 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
     if (!appid) continue;
     const compra = item.best_purchase_option ?? item.purchase_options?.[0] ?? null;
     const gratis = item.is_free === true;
+    // Un juego sin lanzar esta visible y SIN opciones de compra, igual que uno al que
+    // le han quitado el ultimo paquete. Hay 52.752 asi en la tienda, o sea que sin
+    // esta distincion el detector de "ya no se vende" seria un generador de ruido.
+    const lanzamiento = Number(item.release?.steam_release_date ?? 0);
+    const lanzado = lanzamiento > 0 && lanzamiento * 1000 < Date.now();
     salida.set(appid, {
       appid,
       // `visible: false` cubre tanto "retirado" como "nunca existio". No los distingue,
@@ -84,10 +89,12 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
       tipo: normalizarTipo(item.type),
       gratis,
       precio: compra?.formatted_final_price ?? compra?.formatted_original_price ?? null,
+      lanzado,
       // Si le retiran el ultimo paquete, la pagina sigue viva pero no hay forma de
       // comprarlo. Practicamente es una retirada, y mirar solo `visible` no lo ve.
       // Caso real: Anvillage (2026300) visible=true con 0 opciones de compra.
-      comprable: gratis || (item.purchase_options?.length ?? 0) > 0 || item.best_purchase_option != null,
+      // Solo cuenta en juegos ya lanzados, por lo dicho arriba.
+      comprable: !lanzado || gratis || (item.purchase_options?.length ?? 0) > 0 || item.best_purchase_option != null,
     });
   }
   return salida;
