@@ -18,7 +18,7 @@ import { cargarEstado, guardarEstado, contarVisibles, escribirApp, leerApp, RUTA
 import { ejecutarCiclo } from './core/ciclo.js';
 import { publicar } from './core/feed.js';
 import { crearEvento, deduplicar, esUrgente } from './core/eventos.js';
-import { consultarMuchos, confirmarRetirada } from './steam/store.js';
+import { consultarMuchos, confirmarRetirada, enumerarCatalogo } from './steam/store.js';
 import { Limitador } from './lib/http.js';
 import { descargarEstado, subirEstado } from './lib/release.js';
 
@@ -85,20 +85,24 @@ async function watch() {
 // --- comandos por shard ----------------------------------------------------------
 
 async function bootstrap() {
-  const hasta = Number(valor('hasta', 5200000));
   const salida = valor('salida', `.data/shard-${shard}.json`);
-
-  const objetivos = [];
-  for (let a = 1; a <= hasta; a++) if (meToca(a)) objetivos.push(a);
-
-  console.log(`== bootstrap shard ${shard}/${deTotal}: ${objetivos.length} appids a sondear ==`);
   const limitador = new Limitador(100);
+
+  // Ya no hace falta fuerza bruta sobre 5,2M de appids: IStoreQueryService enumera
+  // el catalogo real (~304k) sin API key, 1.000 por peticion.
+  console.log('enumerando el catalogo...');
+  const catalogo = await enumerarCatalogo(limitador, (h, t) => {
+    if (h % 20000 === 0 || h >= t) console.log(`  ${h}/${t}`);
+  });
+  console.log(`catalogo: ${catalogo.length} apps\n`);
+
+  const objetivos = catalogo.filter((a, i) => i % deTotal === shard);
+  console.log(`== bootstrap shard ${shard}/${deTotal}: ${objetivos.length} apps a consultar ==`);
   const encontradas = {};
 
   await consultarMuchos(objetivos, limitador, (h, t) => {
-    if (h % 20000 === 0 || h === t) console.log(`  ${h}/${t} (${((h / t) * 100).toFixed(1)}%)  visibles hasta ahora: ${Object.keys(encontradas).length}`);
+    if (h % 10000 === 0 || h === t) console.log(`  ${h}/${t} (${((h / t) * 100).toFixed(1)}%)`);
   }).then((vistos) => {
-    // solo guardamos lo visible: ~96% del espacio de appids no existe
     for (const [appid, d] of vistos) if (d.visible) encontradas[appid] = [1, d.nombre, d.tipo, d.precio];
   });
 

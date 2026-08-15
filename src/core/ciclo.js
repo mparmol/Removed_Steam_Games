@@ -5,6 +5,8 @@ import * as pics from '../steam/pics.js';
 import { consultarMuchos, gratisAhora, confirmarRetirada } from '../steam/store.js';
 import { promosDePaquetes, promosQueTocanAvisar } from '../steam/promos.js';
 import { comentariosNuevos } from '../sources/remgc.js';
+import { articulosNuevos } from '../sources/delisted.js';
+import { anunciosDe, elegirObjetivos } from '../sources/anuncios.js';
 import { leerApp, escribirApp } from './estado.js';
 import { crearEvento, deduplicar } from './eventos.js';
 
@@ -61,10 +63,22 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       const antes = leerApp(estado, appid);
       const pendiente = estado.pendientes[appid];
 
-      // desaparecido solo en algunos mercados: no es una retirada
+      // Desaparecido solo en algunos mercados: no es una retirada, pero interesa
+      // saberlo. Va al feed con su propio tipo y nunca genera notificacion.
       const conf = confirmacion.get(appid);
       if (conf && !conf.retirado) {
-        registrar(`  ${appid} sigue visible en ${conf.visibleEn.join(',')}: bloqueo regional, no retirada`);
+        registrar(`  ${appid} sigue visible en ${conf.visibleEn.join(',')}: bloqueo regional`);
+        eventos.push(crearEvento({
+          tipo: 'bloqueo_regional',
+          appid,
+          nombre: ahora.nombre || antes?.nombre || '',
+          app_type: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
+          precio: antes?.precio,
+          fuente: 'pics',
+          confianza: 'confirmado',
+          detalle: `Sigue a la venta en ${conf.visibleEn.join(', ')}`,
+        }));
+        escribirApp(estado, appid, { visible: false, nombre: ahora.nombre || antes?.nombre || '', tipo: ahora.tipo, precio: ahora.precio });
         continue;
       }
 
@@ -202,7 +216,85 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
     registrar(`  RemGC fallo: ${e.message}`);
   }
 
-  // ---- 6. Cerrar cursor ---------------------------------------------------------
+  // ---- 6. delistedgames.com: segundo agregador humano ---------------------------
+  try {
+    const arts = await articulosNuevos(estado.delisted?.vistos ?? [], limitador);
+    resumen.delisted = arts.length;
+    registrar(`  delistedgames: ${arts.length} articulos nuevos`);
+
+    // el nombre y el precio no suelen estar en el estado si la app aun no se conoce
+    const conAppid = arts.filter((a) => a.appid);
+    const info = conAppid.length ? await consultarMuchos(conAppid.map((a) => a.appid), limitador) : new Map();
+
+    for (const a of arts) {
+      if (!a.appid) continue;
+      const dato = info.get(a.appid);
+      const conocida = leerApp(estado, a.appid);
+      // guardamos lo aprendido: si luego lo retiran, ya tendremos nombre y precio
+      if (dato) escribirApp(estado, a.appid, dato);
+      eventos.push(crearEvento({
+        tipo: 'retirada_anunciada',
+        appid: a.appid,
+        nombre: dato?.nombre || conocida?.nombre || '',
+        app_type: dato?.tipo ?? conocida?.tipo ?? 'otro',
+        precio: dato?.precio ?? conocida?.precio,
+        fuente: 'delistedgames',
+        anuncio: a.url,
+        detalle: a.titulo,
+        confianza: 'confirmado',
+      }));
+    }
+    estado.delisted = { vistos: [...arts.map((a) => a.url), ...(estado.delisted?.vistos ?? [])].slice(0, 200) };
+  } catch (e) {
+    registrar(`  delistedgames fallo: ${e.message}`);
+  }
+
+  // ---- 7. Avisos de los propios desarrolladores ---------------------------------
+  // La fuente de mas valor: un estudio que anuncia "lo retiramos el dia X" da dias
+  // de margen. No hay feed global, asi que se pregunta app por app con presupuesto
+  // limitado y recorrido rotatorio.
+  try {
+    const senaladas = eventos.filter((e) => e.tipo === 'retirada_anunciada').map((e) => e.appid);
+    const catalogo = Object.keys(estado.apps).map(Number);
+    const { objetivos, cursor } = elegirObjetivos({
+      senaladas,
+      cambiadas: cambios.apps,
+      catalogo,
+      cursor: estado.anuncios?.cursor ?? 0,
+      presupuesto: Number(process.env.PRESUPUESTO_ANUNCIOS ?? 120),
+    });
+
+    const yaAvisados = new Set(estado.anuncios?.avisados ?? []);
+    let encontrados = 0;
+    for (const appid of objetivos) {
+      const avisos = await anunciosDe(appid, limitador).catch(() => []);
+      for (const av of avisos) {
+        if (yaAvisados.has(av.url)) continue;
+        yaAvisados.add(av.url);
+        encontrados++;
+        const conocida = leerApp(estado, appid);
+        eventos.push(crearEvento({
+          tipo: 'retirada_anunciada',
+          appid,
+          nombre: conocida?.nombre ?? '',
+          app_type: conocida?.tipo ?? 'otro',
+          precio: conocida?.precio,
+          fuente: 'desarrollador',
+          anuncio: av.url,
+          detalle: av.extracto,
+          confianza: 'confirmado',
+        }));
+        registrar(`  AVISO DEL ESTUDIO ${appid}: ${av.titulo.slice(0, 70)}`);
+      }
+    }
+    resumen.anuncios = { revisadas: objetivos.length, encontrados };
+    registrar(`  anuncios: ${objetivos.length} apps revisadas, ${encontrados} avisos de retirada`);
+    estado.anuncios = { cursor, avisados: [...yaAvisados].slice(-500) };
+  } catch (e) {
+    registrar(`  anuncios fallo: ${e.message}`);
+  }
+
+  // ---- 8. Cerrar cursor ---------------------------------------------------------
   if (cambios.actual) estado.cursor.changenumber = cambios.actual;
   estado.cursor.ultimo_ciclo = new Date().toISOString();
   estado.cursor.ventana_perdida = cambios.ventanaPerdida;

@@ -11,7 +11,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createSign } from 'node:crypto';
 import { join } from 'node:path';
 
-import { esUrgente, topicDe } from './core/eventos.js';
+import { esUrgente, topicDe, SOLO_FEED } from './core/eventos.js';
 
 const DIR_FEED = process.env.DIR_FEED ?? 'data/feed';
 const RUTA_NOTIFICADOS = join(DIR_FEED, 'notificados.json');
@@ -87,7 +87,8 @@ async function principal() {
 
   const eventos = await leerJson(join(DIR_FEED, 'latest.json'), []);
   const yaEnviados = new Set(await leerJson(RUTA_NOTIFICADOS, []));
-  const pendientes = eventos.filter((e) => !yaEnviados.has(e.id));
+  // los bloqueos regionales se consultan en la app, no interrumpen nunca
+  const pendientes = eventos.filter((e) => !yaEnviados.has(e.id) && !SOLO_FEED.has(e.tipo));
 
   if (pendientes.length === 0) {
     console.log('nada nuevo que notificar');

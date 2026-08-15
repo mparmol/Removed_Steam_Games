@@ -20,6 +20,10 @@ export function estadoVacio() {
     gratis_ahora: [],
     // ultimo comentario procesado del hilo RemGC
     remgc: { ultimo_id: null },
+    // articulos ya procesados de delistedgames.com
+    delisted: { vistos: [] },
+    // recorrido rotatorio del catalogo buscando avisos de los desarrolladores
+    anuncios: { cursor: 0, avisados: [] },
     // deteccion provisional pendiente de confirmar: appid -> {tipo, visto}
     pendientes: {},
   };

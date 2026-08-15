@@ -14,6 +14,8 @@ data class Evento(
     val fuente: String = "",
     /** Último precio conocido antes de desaparecer; Steam ya no lo da una vez retirado. */
     val precio: String? = null,
+    /** Países donde sigue a la venta, o el extracto del aviso del estudio. */
+    val detalle: String? = null,
     val vence: String? = null,
     val enlaces: Enlaces = Enlaces(),
     val confianza: String = "confirmado",
@@ -38,6 +40,9 @@ object Tipos {
     const val FINDE = "finde_gratis"
     const val REVIVIDO = "revivido"
 
+    /** No comprable aquí pero vivo en otros mercados. Solo feed, nunca notificación. */
+    const val REGIONAL = "bloqueo_regional"
+
     fun etiqueta(tipo: String) = when (tipo) {
         RETIRADO -> "Retirado"
         ANUNCIADA -> "Lo van a retirar"
@@ -45,6 +50,7 @@ object Tipos {
         GRATIS_PROXIMO -> "Pronto gratis"
         FINDE -> "Finde gratis"
         REVIVIDO -> "Ha vuelto"
+        REGIONAL -> "Bloqueado en España"
         else -> tipo
     }
 

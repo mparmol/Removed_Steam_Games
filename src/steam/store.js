@@ -113,6 +113,39 @@ export async function consultarMuchos(appids, limitador, alAvanzar) {
 }
 
 /**
+ * Enumera el catalogo completo de la tienda.
+ *
+ * ISteamApps/GetAppList esta muerto (404) e IStoreService/GetAppList exige API key,
+ * asi que durante un tiempo la unica salida parecia ser sondear por fuerza bruta los
+ * 5,2M de appids posibles (~14 h). IStoreQueryService/Query lo resuelve sin key:
+ * 1.000 ids por peticion sobre ~304.000 registros, o sea ~305 peticiones (~15 min).
+ *
+ * @param {(hechos:number, total:number)=>void} [alAvanzar]
+ */
+export async function enumerarCatalogo(limitador, alAvanzar) {
+  const POR_PAGINA = 1000;
+  const todos = [];
+  let total = Infinity;
+
+  for (let inicio = 0; inicio < total; inicio += POR_PAGINA) {
+    const entrada = {
+      query: { start: inicio, count: POR_PAGINA },
+      context: { language: 'english', country_code: 'ES', steam_realm: 1 },
+    };
+    const url = `https://api.steampowered.com/IStoreQueryService/Query/v1/?input_json=${encodeURIComponent(JSON.stringify(entrada))}`;
+    const res = await pedir(url, { limitador });
+
+    total = res?.response?.metadata?.total_matching_records ?? 0;
+    const ids = (res?.response?.ids ?? []).map((x) => Number(x.appid)).filter(Boolean);
+    if (ids.length === 0) break;
+
+    todos.push(...ids);
+    alAvanzar?.(todos.length, total);
+  }
+  return [...new Set(todos)];
+}
+
+/**
  * Juegos gratis AHORA MISMO, segun la busqueda de la tienda.
  *
  * Esta es la fuente de verdad de `gratis_activo`, no PICS: se comprobo con Deponia

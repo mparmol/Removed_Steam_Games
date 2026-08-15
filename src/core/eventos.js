@@ -9,7 +9,12 @@ export const TIPOS = /** @type {const} */ ([
   'gratis_proximo',
   'finde_gratis',
   'revivido',
+  // no comprable desde Espana pero vivo en otros mercados: va al feed, nunca a push
+  'bloqueo_regional',
 ]);
+
+/** Tipos que jamas generan notificacion, solo entrada en el feed. */
+export const SOLO_FEED = new Set(['bloqueo_regional']);
 
 /**
  * Enlaces de accion de un evento.
@@ -56,6 +61,8 @@ export function crearEvento(datos) {
     fuente: datos.fuente,
     // ultimo precio conocido antes de desaparecer; Steam ya no lo da una vez retirado
     precio: datos.precio ?? null,
+    // texto libre: en que paises sigue vendiendose, o el extracto del aviso del estudio
+    detalle: datos.detalle ?? null,
     vence: datos.vence ?? null,
     enlaces: enlacesDe(datos.appid, datos.nombre, datos.anuncio),
     confianza: datos.confianza ?? 'provisional',
@@ -79,7 +86,9 @@ export function deduplicar(eventos) {
  * volumen diario es alto, asi que solo lo urgente interrumpe; el resto va a resumen.
  */
 export function esUrgente(ev) {
+  if (SOLO_FEED.has(ev.tipo)) return false;
   if (ev.tipo === 'gratis_activo' || ev.tipo === 'gratis_proximo') return true;
+  // el preaviso es lo que permite comprarlo a tiempo: siempre interrumpe
   if (ev.tipo === 'retirada_anunciada') return true;
   if (ev.tipo === 'retirado' && ev.app_type === 'game') return true;
   return false;

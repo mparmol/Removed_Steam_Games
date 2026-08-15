@@ -183,6 +183,10 @@ private fun Detalle(ev: Evento, alCerrar: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("${Tipos.etiqueta(ev.tipo)} · ${Tipos.etiquetaContenido(ev.app_type)}")
+                ev.detalle?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+                ev.precio?.let { Text("Precio: $it") }
                 Text("Detectado: ${ev.detectado.take(16).replace('T', ' ')}")
                 Text("Fuente: ${ev.fuente}")
                 ev.vence?.let { Text("Vence: ${it.take(16).replace('T', ' ')}") }
