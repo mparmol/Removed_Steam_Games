@@ -144,3 +144,15 @@ test('remgc: los ids NO son crecientes, hay que llevar registro de lo visto', ()
   const conRegistro = enPagina.filter((id) => !vistos.has(id));
   assert.equal(conRegistro.length, 2, 'el registro explicito si los detecta');
 });
+
+test('store: los codigos de tipo son los comprobados contra el catalogo real', async () => {
+  const { normalizarTipo } = await import('../src/steam/store.js');
+  // verificados enumerando por filtro de tipo y mirando el `type` devuelto
+  assert.equal(normalizarTipo(0), 'game');
+  assert.equal(normalizarTipo(1), 'demo', 'las demos son 1, no 14');
+  assert.equal(normalizarTipo(4), 'dlc');
+  assert.equal(normalizarTipo(6), 'application');
+  assert.equal(normalizarTipo(7), 'video');
+  assert.equal(normalizarTipo(11), 'music', 'la musica es 11, no 10');
+  assert.equal(normalizarTipo(99), 'otro');
+});

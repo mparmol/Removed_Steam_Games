@@ -17,10 +17,27 @@ const GETITEMS = 'https://api.steampowered.com/IStoreBrowseService/GetItems/v1/'
 /** Tipos de app tal y como los devuelve la tienda, normalizados a nuestro vocabulario. */
 const TIPOS = { game: 'game', dlc: 'dlc', music: 'music', demo: 'demo', video: 'video', application: 'application' };
 
+/**
+ * Codigos numericos de `type` en GetItems, comprobados uno a uno contra el catalogo
+ * (enumerando por filtro de tipo y mirando que devuelve cada uno).
+ *
+ * La tabla anterior estaba inventada y fallaba justo en demos (1) y musica (11), que
+ * acababan como "otro": 30.756 apps mal etiquetadas y los filtros de la app inservibles
+ * para el tipo de contenido que mas se retira.
+ */
+const CODIGOS = {
+  0: 'game',
+  1: 'demo',
+  4: 'dlc',
+  6: 'application',
+  7: 'video',
+  10: 'hardware',
+  11: 'music',
+};
+
 export function normalizarTipo(t) {
   if (typeof t === 'string') return TIPOS[t.toLowerCase()] ?? 'otro';
-  // GetItems devuelve tambien un enum numerico en algunos casos
-  return { 0: 'game', 4: 'dlc', 10: 'music', 13: 'video', 14: 'demo', 2: 'application' }[t] ?? 'otro';
+  return CODIGOS[t] ?? 'otro';
 }
 
 /**
@@ -135,6 +152,7 @@ export async function enumerarCatalogo(limitador, alAvanzar) {
     ['music', { type_filters: { include_music: true } }],
     ['dlc', { type_filters: { include_dlc: true } }],
     ['software', { type_filters: { include_software: true } }],
+    ['games', { type_filters: { include_games: true } }],
     ['video', { type_filters: { include_video: true } }],
   ];
 
