@@ -57,7 +57,13 @@ export function anuncioDeTexto(texto) {
 }
 
 /** Cuantas paginas hacia atras leer como maximo en una pasada. */
-const PAGINAS_MAX = 8;
+const PAGINAS_MAX = 10;
+/**
+ * Suelo de paginas: aunque no haya movimiento, se releen siempre las ultimas.
+ * Cuesta 5 peticiones por ciclo y cubre ediciones, comentarios que aparecen fuera
+ * de orden y cualquier hueco que deje el calculo por total_count.
+ */
+const PAGINAS_MIN = 5;
 
 /**
  * Devuelve los comentarios del hilo posteriores a `ultimoId`.
@@ -89,9 +95,8 @@ export async function comentariosNuevos(vistos = [], ultimoTotal = null, limitad
 
   const ultimaPagina = Math.ceil(total / porPagina);
 
-  // sin referencia previa cogemos un colchon de 3 paginas (~45 comentarios)
-  const entrantes = ultimoTotal != null ? Math.max(0, total - ultimoTotal) : porPagina * 3;
-  const cuantasPaginas = Math.min(PAGINAS_MAX, Math.max(1, Math.ceil(entrantes / porPagina) + 1));
+  const entrantes = ultimoTotal != null ? Math.max(0, total - ultimoTotal) : porPagina * PAGINAS_MIN;
+  const cuantasPaginas = Math.min(PAGINAS_MAX, Math.max(PAGINAS_MIN, Math.ceil(entrantes / porPagina) + 1));
 
   const comentarios = [];
   for (let i = 0; i < cuantasPaginas; i++) {

@@ -211,20 +211,36 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
     const appidsRemgc = [...new Set(nuevos.flatMap((c) => c.appids))];
     const info = appidsRemgc.length ? await consultarMuchos(appidsRemgc, limitador) : new Map();
 
+    // Al retroceder paginas salen anuncios de juegos que YA se retiraron. Decir
+    // "lo van a retirar" de algo que ya no existe es ruido: se registra y se calla.
+    let yaFuera = 0;
+    const anunciados = new Set();
     for (const com of nuevos) {
       for (const appid of com.appids) {
+        if (anunciados.has(appid)) continue;
+        anunciados.add(appid);
+
         const dato = info.get(appid);
+        if (dato && !dato.visible) {
+          yaFuera++;
+          if (!estado.retirados[appid]) estado.retirados[appid] = new Date().toISOString();
+          continue;
+        }
+        if (dato) escribirApp(estado, appid, dato);
+
         eventos.push(crearEvento({
           tipo: 'retirada_anunciada',
           appid,
           nombre: dato?.nombre ?? leerApp(estado, appid)?.nombre ?? '',
-          app_type: dato?.tipo ?? 'otro',
+          app_type: dato?.tipo ?? leerApp(estado, appid)?.tipo ?? 'otro',
+          precio: dato?.precio ?? leerApp(estado, appid)?.precio,
           fuente: 'remgc',
           anuncio: com.anuncio,
           confianza: 'confirmado',
         }));
       }
     }
+    if (yaFuera > 0) registrar(`  RemGC: ${yaFuera} appids omitidos porque ya estan retirados`);
     estado.remgc = { vistos, total };
   } catch (e) {
     registrar(`  RemGC fallo: ${e.message}`);
@@ -244,6 +260,11 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       if (!a.appid) continue;
       const dato = info.get(a.appid);
       const conocida = leerApp(estado, a.appid);
+      // mismo criterio que con RemGC: si ya no esta a la venta, no es un preaviso
+      if (dato && !dato.visible) {
+        if (!estado.retirados[a.appid]) estado.retirados[a.appid] = new Date().toISOString();
+        continue;
+      }
       // guardamos lo aprendido: si luego lo retiran, ya tendremos nombre y precio
       if (dato) escribirApp(estado, a.appid, dato);
       eventos.push(crearEvento({
