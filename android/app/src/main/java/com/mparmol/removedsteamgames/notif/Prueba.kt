@@ -56,11 +56,12 @@ object Prueba {
             NotificationManagerCompat.from(ctx).notify(9001, n)
             buildString {
                 append("Enviada. Bloquea la pantalla ahora para ver cómo se comporta.\n")
-                append("Canal: «Van a retirarlo» (importancia alta).\n")
+                append("Canal: «Van a retirarlo» (importancia alta).\n\n")
                 append(
-                    if (Canales.puedeSaltarseDnd(ctx)) "Puede saltarse el modo No molestar."
-                    else "NO puede saltarse el modo No molestar: si lo tienes activo, no la verás. " +
-                        "Púlsalo en el botón de abajo para permitirlo.",
+                    "Si en la pantalla de bloqueo ves el icono pero NO el texto, es un ajuste " +
+                        "del sistema que la app no puede cambiar:\n" +
+                        "Ajustes de Android → Notificaciones → Pantalla de bloqueo → " +
+                        "«Mostrar todo el contenido».",
                 )
             }
         } catch (e: SecurityException) {
