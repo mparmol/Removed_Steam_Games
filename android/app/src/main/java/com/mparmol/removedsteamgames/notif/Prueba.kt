@@ -35,7 +35,7 @@ object Prueba {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-        val n = NotificationCompat.Builder(ctx, "retirada_anunciada")
+        val n = NotificationCompat.Builder(ctx, Canales.id("retirada_anunciada"))
             .setSmallIcon(R.drawable.ic_notificacion)
             .setContentTitle("Van a retirarlo de Steam")
             .setContentText("Ejemplo de prueba (49,99€) — última oportunidad para comprarlo")
@@ -54,8 +54,15 @@ object Prueba {
 
         return try {
             NotificationManagerCompat.from(ctx).notify(9001, n)
-            "Enviada. Bloquea la pantalla ahora para ver cómo se comporta.\n" +
-                "Canal: «Van a retirarlo» (importancia alta)."
+            buildString {
+                append("Enviada. Bloquea la pantalla ahora para ver cómo se comporta.\n")
+                append("Canal: «Van a retirarlo» (importancia alta).\n")
+                append(
+                    if (Canales.puedeSaltarseDnd(ctx)) "Puede saltarse el modo No molestar."
+                    else "NO puede saltarse el modo No molestar: si lo tienes activo, no la verás. " +
+                        "Púlsalo en el botón de abajo para permitirlo.",
+                )
+            }
         } catch (e: SecurityException) {
             "Falta el permiso de notificaciones: ${e.message}"
         }

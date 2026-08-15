@@ -25,7 +25,7 @@ class MensajeriaService : FirebaseMessagingService() {
         val cuerpo = mensaje.notification?.body ?: datos["nombre"].orEmpty()
 
         // el canal del resumen es distinto del de los eventos individuales
-        val canal = if (tipo == "resumen") "resumen" else canalPara(tipo)
+        val canal = Canales.id(if (tipo == "resumen") "resumen" else canalPara(tipo))
 
         val abrirApp = PendingIntent.getActivity(
             this, 0,

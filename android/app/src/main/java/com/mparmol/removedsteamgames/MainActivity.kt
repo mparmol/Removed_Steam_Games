@@ -29,6 +29,7 @@ import com.mparmol.removedsteamgames.datos.Biblioteca
 import com.mparmol.removedsteamgames.datos.Evento
 import com.mparmol.removedsteamgames.datos.Feed
 import com.mparmol.removedsteamgames.datos.Tipos
+import com.mparmol.removedsteamgames.notif.Canales
 import com.mparmol.removedsteamgames.notif.Prueba
 import com.mparmol.removedsteamgames.notif.Topics
 import kotlinx.coroutines.launch
@@ -377,6 +378,21 @@ private fun Ajustes() {
                     ) { Text(if (comprobando) "Comprobando…" else "Comprobar suscripción") }
 
                     OutlinedButton(onClick = { diagnostico = Prueba.enviar(ctx) }) { Text("Notificación de prueba") }
+                }
+
+                // Enterrado en los ajustes de Android no lo encuentra nadie, y es lo
+                // que decide si un aviso urgente atraviesa el modo No molestar.
+                if (!Canales.puedeSaltarseDnd(ctx)) {
+                    OutlinedButton(
+                        onClick = {
+                            runCatching {
+                                ctx.startActivity(
+                                    Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }
+                        },
+                    ) { Text("Permitir saltarse No molestar") }
                 }
 
                 diagnostico?.let {

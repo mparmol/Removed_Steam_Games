@@ -104,7 +104,7 @@ async function principal() {
         body: `${frio.eventos} avisos cargados. A partir de ahora solo lo nuevo.`,
       },
       data: { tipo: 'arranque', total: String(frio.eventos) },
-      android: { priority: 'normal', notification: { channel_id: 'resumen' } },
+      android: { priority: 'normal', notification: { channel_id: 'resumen_v2' } },
     });
     await writeFile(marcaFrio, JSON.stringify({ enviado: new Date().toISOString() }));
     console.log('aviso de puesta en marcha enviado');
@@ -153,7 +153,9 @@ async function principal() {
         allkeyshop: ev.enlaces.allkeyshop ?? '',
         anuncio: ev.enlaces.anuncio ?? '',
       },
-      android: { priority: 'high', notification: { channel_id: ev.tipo, tag: ev.id } },
+      // el sufijo de generacion tiene que coincidir con Canales.GEN de la app:
+      // Android no deja reconfigurar un canal existente, asi que se estrenan ids
+      android: { priority: 'high', notification: { channel_id: `${ev.tipo}_v2`, tag: ev.id } },
     });
     console.log(`  -> ${topicDe(ev)}: ${ev.tipo} ${ev.appid} ${ev.nombre}`);
   }
@@ -170,7 +172,7 @@ async function principal() {
       topic: 'resumen',
       notification: { title: `${resto.length} avisos mas`, body: desglose },
       data: { tipo: 'resumen', total: String(resto.length), ids: resto.map((e) => e.id).join(',') },
-      android: { priority: 'normal', notification: { channel_id: 'resumen', tag: 'resumen' } },
+      android: { priority: 'normal', notification: { channel_id: 'resumen_v2', tag: 'resumen' } },
     });
     console.log(`  -> resumen: ${resto.length} eventos (${desglose})`);
   }

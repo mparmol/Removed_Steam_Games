@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Desde Android 13 el usuario tiene que conceder las notificaciones a mano -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Permite que los avisos urgentes atraviesen el modo No molestar. Android solo
+         lo concede si el usuario lo autoriza expresamente en los ajustes. -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
 
     <application
         android:name=".App"
@@ -35,7 +38,7 @@
 
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="resumen" />
+            android:value="resumen_v2" />
 
     </application>
 </manifest>
