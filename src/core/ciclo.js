@@ -62,9 +62,20 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       .map((v) => v.appid);
 
     const confirmacion = sospechosos.length > 0 ? await confirmarRetirada(sospechosos, limitador) : new Map();
+
+    // Steam marca en PICS las retiradas pedidas por el editor. Donde aparece ese flag
+    // no hay nada que interpretar: es una retirada, sin importar lo que digan los
+    // paises ni si la ficha sigue publicada.
+    let porEditor = new Set();
     if (sospechosos.length > 0) {
+      porEditor = await pics.retiradasPorEditor(sospechosos).catch(() => new Set());
+      for (const appid of porEditor) {
+        const c = confirmacion.get(appid);
+        if (c) { c.retirado = true; c.soloEscaparate = false; }
+      }
       const regionales = [...confirmacion.values()].filter((c) => !c.retirado).length;
-      registrar(`  ${sospechosos.length} sospechosos: ${sospechosos.length - regionales} retirados, ${regionales} solo bloqueo regional`);
+      registrar(`  ${sospechosos.length} sospechosos: ${sospechosos.length - regionales} retirados` +
+        ` (${porEditor.size} confirmados por flag del editor), ${regionales} bloqueo regional`);
     }
 
     for (const [appid, ahora] of vistos) {

@@ -73,6 +73,32 @@ export async function cambiosDesde(cursor, { ultimoCicloMs = null } = {}) {
   });
 }
 
+/**
+ * Apps que el editor ha pedido retirar.
+ *
+ * `common.app_retired_publisher_request` es la senal autoritativa de Steam para el
+ * caso "retirado a peticion del editor": la ficha se queda publicada con el aviso de
+ * "no longer available" y `visible` sigue en true. Comprobado: Anvillage (2026300) lo
+ * tiene a 1 y Portal 2 no.
+ *
+ * Es de alta precision pero poca cobertura: las retiradas antiguas por licencia
+ * (Marvel Heroes, TMNT) no lo llevan. Sirve para confirmar sin dudas, no para detectar
+ * todo.
+ *
+ * @returns {Promise<Set<number>>}
+ */
+export async function retiradasPorEditor(appids) {
+  if (appids.length === 0) return new Set();
+  return await conSesion(async (user) => {
+    const info = await user.getProductInfo(appids, [], true);
+    const marcadas = new Set();
+    for (const [appid, p] of Object.entries(info.apps)) {
+      if (p.appinfo?.common?.app_retired_publisher_request) marcadas.add(Number(appid));
+    }
+    return marcadas;
+  });
+}
+
 /** Datos crudos de paquetes (para detectar promociones). */
 export async function infoPaquetes(packageids) {
   if (packageids.length === 0) return [];
