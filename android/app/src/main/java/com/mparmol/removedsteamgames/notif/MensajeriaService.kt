@@ -43,6 +43,13 @@ class MensajeriaService : FirebaseMessagingService() {
             .setStyle(NotificationCompat.BigTextStyle().bigText(cuerpo))
             .setAutoCancel(true)
             .setContentIntent(abrirApp)
+            // visible en pantalla de bloqueo sin tener que desbloquear
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(
+                if (tipo == "resumen") NotificationCompat.PRIORITY_DEFAULT
+                else NotificationCompat.PRIORITY_HIGH,
+            )
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
 
         // Steam primero; en una retirada lo util de verdad es Allkeyshop, porque
         // Steam ya no te lo vende.

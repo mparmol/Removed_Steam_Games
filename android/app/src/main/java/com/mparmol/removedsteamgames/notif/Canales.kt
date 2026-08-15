@@ -1,5 +1,6 @@
 package com.mparmol.removedsteamgames.notif
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -19,13 +20,22 @@ object Canales {
         Triple("retirada_anunciada", "Van a retirarlo", NotificationManager.IMPORTANCE_HIGH),
         Triple("retirado", "Retirados", NotificationManager.IMPORTANCE_DEFAULT),
         Triple("revivido", "Han vuelto", NotificationManager.IMPORTANCE_LOW),
-        Triple("resumen", "Resumen agrupado", NotificationManager.IMPORTANCE_LOW),
+        // Sube de LOW a DEFAULT: un resumen que no se ve no sirve de nada, y es
+        // ademas el canal por el que llega el aviso de puesta en marcha.
+        Triple("resumen", "Resumen agrupado", NotificationManager.IMPORTANCE_DEFAULT),
     )
 
     fun crear(ctx: Context) {
         val nm = ctx.getSystemService<NotificationManager>() ?: return
         for ((id, nombre, importancia) in definiciones) {
-            nm.createNotificationChannel(NotificationChannel(id, nombre, importancia))
+            val canal = NotificationChannel(id, nombre, importancia).apply {
+                // Que el contenido se lea en la pantalla de bloqueo sin desbloquear:
+                // de nada sirve enterarse de que quedan horas si hay que abrir el movil.
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                enableVibration(importancia >= NotificationManager.IMPORTANCE_DEFAULT)
+                setShowBadge(true)
+            }
+            nm.createNotificationChannel(canal)
         }
     }
 }
