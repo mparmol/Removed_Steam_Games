@@ -87,6 +87,9 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         // segunda mirada: confirmamos o descartamos
         const sigue = pendiente.tipo === 'retirado' ? !ahora.visible : ahora.visible;
         if (sigue) {
+          // deja constancia para poder distinguir un regreso real de un estreno
+          if (pendiente.tipo === 'retirado') estado.retirados[appid] = new Date().toISOString();
+          else delete estado.retirados[appid];
           eventos.push(crearEvento({
             tipo: pendiente.tipo,
             appid,
@@ -101,6 +104,12 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         }
         delete estado.pendientes[appid];
       } else if (antes && antes.visible !== ahora.visible) {
+        // Una app que pasa a visible solo "ha vuelto" si la vimos retirar. Si nunca
+        // estuvo retirada es un estreno de pagina de tienda, no una resurreccion.
+        if (ahora.visible && !estado.retirados[appid]) {
+          escribirApp(estado, appid, { visible: true, nombre: ahora.nombre, tipo: ahora.tipo, precio: ahora.precio });
+          continue;
+        }
         // transicion nueva: se emite provisional y queda pendiente de confirmar
         const tipo = ahora.visible ? 'revivido' : 'retirado';
         // el nombre se pierde cuando deja de ser visible: conservamos el que teniamos

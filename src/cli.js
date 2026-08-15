@@ -185,6 +185,11 @@ async function fusionar() {
       console.log(`  ${t.appid} visible en ${conf.visibleEn.join(',')}: bloqueo regional, no retirada`);
       continue;
     }
+    // igual que en el ciclo: pasar a visible solo es "ha vuelto" si lo vimos retirar
+    if (t.ahora.visible && !estado.retirados[t.appid]) continue;
+    if (t.ahora.visible) delete estado.retirados[t.appid];
+    else estado.retirados[t.appid] = new Date().toISOString();
+
     eventos.push(crearEvento({
       tipo: t.ahora.visible ? 'revivido' : 'retirado',
       appid: t.appid,

@@ -15,19 +15,23 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mparmol.removedsteamgames.datos.Biblioteca
 import com.mparmol.removedsteamgames.datos.Evento
 import com.mparmol.removedsteamgames.datos.Feed
 import com.mparmol.removedsteamgames.datos.Tipos
 import com.mparmol.removedsteamgames.notif.Topics
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 class MainActivity : ComponentActivity() {
 
@@ -54,9 +58,16 @@ fun Pantalla() {
     var eventos by remember { mutableStateOf(Feed.cacheado(ctx)) }
     var cargando by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var filtro by remember { mutableStateOf<String?>(null) }
     var seleccionado by remember { mutableStateOf<Evento?>(null) }
     var enAjustes by remember { mutableStateOf(false) }
+
+    // Filtros de marcar/desmarcar: se parte de "todo visible" y se van ocultando.
+    var ocultos by remember { mutableStateOf(setOf<String>()) }
+    var soloHoy by remember { mutableStateOf(false) }
+    var ocultarPoseidos by remember { mutableStateOf(false) }
+
+    val poseidos by Biblioteca.poseidos(ctx).collectAsStateWithLifecycle(initialValue = emptySet())
+    val deseados by Biblioteca.deseados(ctx).collectAsStateWithLifecycle(initialValue = emptySet())
 
     fun refrescar() {
         if (cargando) return
@@ -77,23 +88,28 @@ fun Pantalla() {
             TopAppBar(
                 title = { Text(if (enAjustes) "Ajustes" else "Juegos retirados") },
                 actions = {
-                    if (!enAjustes) {
-                        TextButton(onClick = { refrescar() }, enabled = !cargando) { Text("Actualizar") }
-                    }
+                    if (!enAjustes) TextButton(onClick = { refrescar() }, enabled = !cargando) { Text("Actualizar") }
                     TextButton(onClick = { enAjustes = !enAjustes }) { Text(if (enAjustes) "Volver" else "Ajustes") }
                 },
             )
         },
     ) { pad ->
         Box(Modifier.padding(pad)) {
-            when {
-                enAjustes -> Ajustes()
-                else -> Listado(
+            if (enAjustes) {
+                Ajustes()
+            } else {
+                Listado(
                     eventos = eventos,
-                    filtro = filtro,
+                    ocultos = ocultos,
+                    soloHoy = soloHoy,
+                    ocultarPoseidos = ocultarPoseidos,
+                    poseidos = poseidos,
+                    deseados = deseados,
                     cargando = cargando,
                     error = error,
-                    alFiltrar = { filtro = if (filtro == it) null else it },
+                    alAlternarTipo = { ocultos = if (it in ocultos) ocultos - it else ocultos + it },
+                    alAlternarHoy = { soloHoy = !soloHoy },
+                    alAlternarPoseidos = { ocultarPoseidos = !ocultarPoseidos },
                     alPulsar = { seleccionado = it },
                 )
             }
@@ -101,23 +117,39 @@ fun Pantalla() {
     }
 
     seleccionado?.let { ev ->
-        Detalle(ev) { seleccionado = null }
+        Detalle(ev, ev.appid in poseidos, ev.appid in deseados) { seleccionado = null }
     }
 }
+
+private fun esDeHoy(iso: String): Boolean = runCatching {
+    iso.take(10) == LocalDate.now().toString()
+}.getOrDefault(false)
 
 @Composable
 private fun Listado(
     eventos: List<Evento>,
-    filtro: String?,
+    ocultos: Set<String>,
+    soloHoy: Boolean,
+    ocultarPoseidos: Boolean,
+    poseidos: Set<Int>,
+    deseados: Set<Int>,
     cargando: Boolean,
     error: String?,
-    alFiltrar: (String) -> Unit,
+    alAlternarTipo: (String) -> Unit,
+    alAlternarHoy: () -> Unit,
+    alAlternarPoseidos: () -> Unit,
     alPulsar: (Evento) -> Unit,
 ) {
-    val visibles = remember(eventos, filtro) {
-        if (filtro == null) eventos else eventos.filter { it.tipo == filtro }
+    val tiposPresentes = remember(eventos) { eventos.map { it.tipo }.distinct().sorted() }
+
+    val visibles = remember(eventos, ocultos, soloHoy, ocultarPoseidos, poseidos) {
+        eventos.filter { ev ->
+            ev.tipo !in ocultos &&
+                (!soloHoy || esDeHoy(ev.detectado)) &&
+                (!ocultarPoseidos || ev.appid !in poseidos)
+        }
     }
-    val tiposPresentes = remember(eventos) { eventos.map { it.tipo }.distinct() }
+    val hoy = remember(eventos) { eventos.count { esDeHoy(it.detectado) } }
 
     Column {
         if (cargando) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -130,27 +162,49 @@ private fun Listado(
             )
         }
 
+        // Chips de tipo: marcado = se muestra, desmarcado = oculto
         Row(
             Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             tiposPresentes.forEach { t ->
+                val cuantos = eventos.count { it.tipo == t }
                 FilterChip(
-                    selected = filtro == t,
-                    onClick = { alFiltrar(t) },
-                    label = { Text(Tipos.etiqueta(t)) },
+                    selected = t !in ocultos,
+                    onClick = { alAlternarTipo(t) },
+                    label = { Text("${Tipos.etiqueta(t)} ($cuantos)") },
                 )
             }
         }
 
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(
+                selected = soloHoy,
+                onClick = alAlternarHoy,
+                label = { Text(if (soloHoy) "Solo hoy ($hoy)" else "Todo el histórico") },
+            )
+            if (poseidos.isNotEmpty()) {
+                FilterChip(
+                    selected = ocultarPoseidos,
+                    onClick = alAlternarPoseidos,
+                    label = { Text("Ocultar los que tengo") },
+                )
+            }
+        }
+
+        HorizontalDivider()
+
         if (visibles.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(if (cargando) "Cargando…" else "Nada por aquí todavía")
+                Text(if (cargando) "Cargando…" else "Nada que mostrar con estos filtros")
             }
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(visibles, key = { it.id }) { ev ->
-                    Fila(ev, alPulsar)
+                    Fila(ev, ev.appid in poseidos, ev.appid in deseados, alPulsar)
                     HorizontalDivider()
                 }
             }
@@ -159,12 +213,19 @@ private fun Listado(
 }
 
 @Composable
-private fun Fila(ev: Evento, alPulsar: (Evento) -> Unit) {
+private fun Fila(ev: Evento, lotengo: Boolean, lodeseo: Boolean, alPulsar: (Evento) -> Unit) {
     ListItem(
-        headlineContent = { Text(ev.titulo, fontWeight = FontWeight.Medium) },
+        headlineContent = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(ev.titulo, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f, fill = false))
+                // lo que ya tienes deja de ser urgente; lo deseado es justo lo contrario
+                if (lotengo) Marca("La tienes", MaterialTheme.colorScheme.secondaryContainer)
+                else if (lodeseo) Marca("Deseado", MaterialTheme.colorScheme.tertiaryContainer)
+            }
+        },
         supportingContent = {
             val precio = ev.precio?.let { " · $it" } ?: ""
-            val extra = ev.vence?.let { " · vence ${it.take(16).replace('T', ' ')}" } ?: ""
+            val extra = ev.vence?.let { " · se retira ${it.take(10)}" } ?: ""
             Text("${Tipos.etiqueta(ev.tipo)} · ${Tipos.etiquetaContenido(ev.app_type)}$precio$extra")
         },
         overlineContent = { Text(ev.detectado.take(16).replace('T', ' ')) },
@@ -173,7 +234,14 @@ private fun Fila(ev: Evento, alPulsar: (Evento) -> Unit) {
 }
 
 @Composable
-private fun Detalle(ev: Evento, alCerrar: () -> Unit) {
+private fun Marca(texto: String, color: androidx.compose.ui.graphics.Color) {
+    Surface(color = color, shape = MaterialTheme.shapes.small) {
+        Text(texto, Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun Detalle(ev: Evento, lotengo: Boolean, lodeseo: Boolean, alCerrar: () -> Unit) {
     val ctx = LocalContext.current
     fun abrir(url: String) = ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 
@@ -182,16 +250,17 @@ private fun Detalle(ev: Evento, alCerrar: () -> Unit) {
         title = { Text(ev.titulo) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (lotengo) Text("Ya la tienes en tu biblioteca", color = MaterialTheme.colorScheme.primary)
+                if (lodeseo) Text("Está en tu lista de deseados", color = MaterialTheme.colorScheme.primary)
                 Text("${Tipos.etiqueta(ev.tipo)} · ${Tipos.etiquetaContenido(ev.app_type)}")
                 ev.detalle?.takeIf { it.isNotBlank() }?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall)
                 }
                 ev.precio?.let { Text("Precio: $it") }
+                ev.vence?.let { Text("Se retira: ${it.take(10)}") }
                 Text("Detectado: ${ev.detectado.take(16).replace('T', ' ')}")
                 Text("Fuente: ${ev.fuente}")
-                ev.vence?.let { Text("Vence: ${it.take(16).replace('T', ' ')}") }
                 Spacer(Modifier.height(8.dp))
-                // En una retirada este es el enlace util: Steam ya no te lo vende.
                 ev.enlaces.allkeyshop?.let {
                     Button(onClick = { abrir(it) }, Modifier.fillMaxWidth()) { Text("Buscar clave en Allkeyshop") }
                 }
@@ -215,11 +284,56 @@ private fun Ajustes() {
     val ctx = LocalContext.current
     val ambito = rememberCoroutineScope()
     val activos by Topics.activos(ctx).collectAsStateWithLifecycle(initialValue = emptySet())
+    val config by Biblioteca.config(ctx).collectAsStateWithLifecycle(initialValue = Biblioteca.Config("", "", null))
+
     var diagnostico by remember { mutableStateOf<String?>(null) }
     var comprobando by remember { mutableStateOf(false) }
+    var clave by remember(config.clave) { mutableStateOf(config.clave) }
+    var steamId by remember(config.steamId) { mutableStateOf(config.steamId) }
+    var estadoSync by remember { mutableStateOf<String?>(null) }
+    var sincronizando by remember { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize()) {
         item {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Tu cuenta de Steam", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Sirve para marcar lo que ya tienes y poder ocultarlo. La clave y el ID se " +
+                        "guardan solo en este móvil: no se envían a ningún servidor ni al repositorio.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = steamId,
+                    onValueChange = { steamId = it },
+                    label = { Text("SteamID64 o nombre del perfil") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = clave,
+                    onValueChange = { clave = it },
+                    label = { Text("Clave de la API de Steam") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions.Default,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = {
+                        sincronizando = true
+                        ambito.launch {
+                            estadoSync = Biblioteca.sincronizar(ctx, clave, steamId)
+                            sincronizando = false
+                        }
+                    },
+                    enabled = !sincronizando,
+                ) { Text(if (sincronizando) "Sincronizando…" else "Sincronizar biblioteca") }
+
+                (estadoSync ?: config.sincronizado?.let { "Última sincronización: ${it.take(16).replace('T', ' ')}" })
+                    ?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+            }
+            HorizontalDivider()
+
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Diagnóstico de notificaciones", style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -243,6 +357,12 @@ private fun Ajustes() {
                 }
             }
             HorizontalDivider()
+
+            Text(
+                "Qué quieres que te notifique",
+                Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp),
+                style = MaterialTheme.typography.titleMedium,
+            )
         }
         items(Topics.TODOS, key = { it.id }) { t ->
             ListItem(

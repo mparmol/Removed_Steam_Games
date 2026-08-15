@@ -3,14 +3,12 @@ package com.mparmol.removedsteamgames.notif
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.preferencesDataStore
 import com.google.firebase.messaging.FirebaseMessaging
+import com.mparmol.removedsteamgames.datos.ajustes
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
-
-private val Context.ajustes by preferencesDataStore("ajustes")
 
 /**
  * El backend publica por topic, no por dispositivo. Desuscribirse de un topic corta

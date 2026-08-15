@@ -29,6 +29,10 @@ export function estadoVacio() {
     previstas: {},
     // deteccion provisional pendiente de confirmar: appid -> {tipo, visto}
     pendientes: {},
+    // apps que NOSOTROS vimos retirar: appid -> fecha.
+    // Sin esto, "ha vuelto" se dispara con cualquier app que pase a visible, incluidos
+    // los juegos que estrenan pagina de tienda y nunca estuvieron retirados.
+    retirados: {},
   };
 }
 
