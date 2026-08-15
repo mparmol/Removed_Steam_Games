@@ -1,0 +1,4 @@
+# Los scripts que ejecutan los runners son Linux: con CRLF fallan con "bad interpreter".
+*.sh text eol=lf
+*.yml text eol=lf
+*.js text eol=lf
