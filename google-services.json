@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1064675363985",
+    "project_id": "removed-steam-games",
+    "storage_bucket": "removed-steam-games.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1064675363985:android:a42bf49de88f796dcf8330",
+        "android_client_info": {
+          "package_name": "com.mparmol.removedsteamgames"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC3V7L_NIKjNQf6rXkTsnN08OMFaZqUa7E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
