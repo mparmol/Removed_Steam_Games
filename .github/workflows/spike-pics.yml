@@ -1,0 +1,38 @@
+name: SPIKE - PICS desde runner de GitHub
+
+# Test desechable: ¿permite Steam el login anónimo de PICS desde una IP de Azure?
+on:
+  workflow_dispatch:
+  push:
+    branches: [spike/pics]
+
+jobs:
+  pics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: IP pública del runner
+        run: curl -s https://api.ipify.org; echo
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Instalar steam-user
+        run: cd spike && npm install steam-user --no-audit --no-fund
+
+      - name: Intento 1 - login anónimo + PICS
+        run: cd spike && node 1-pics.js
+
+      - name: Intento 2 - reconexión inmediata (¿rate limit por IP?)
+        if: always()
+        run: cd spike && node 1-pics.js
+
+      - name: Intento 3 - tercera conexión seguida
+        if: always()
+        run: cd spike && node 1-pics.js
+
+      - name: Rate limit de la Store API desde esta IP
+        if: always()
+        run: cd spike && node 6-sustained.js
