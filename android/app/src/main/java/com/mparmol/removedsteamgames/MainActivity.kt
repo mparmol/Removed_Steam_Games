@@ -111,6 +111,7 @@ fun Pantalla() {
                     alAlternarHoy = { soloHoy = !soloHoy },
                     alAlternarPoseidos = { ocultarPoseidos = !ocultarPoseidos },
                     alPulsar = { seleccionado = it },
+                    alMarcar = { appid, tengo -> ambito.launch { Biblioteca.marcarPoseido(ctx, appid, tengo) } },
                 )
             }
         }
@@ -139,6 +140,7 @@ private fun Listado(
     alAlternarHoy: () -> Unit,
     alAlternarPoseidos: () -> Unit,
     alPulsar: (Evento) -> Unit,
+    alMarcar: (Int, Boolean) -> Unit,
 ) {
     val tiposPresentes = remember(eventos) { eventos.map { it.tipo }.distinct().sorted() }
 
@@ -204,7 +206,7 @@ private fun Listado(
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(visibles, key = { it.id }) { ev ->
-                    Fila(ev, ev.appid in poseidos, ev.appid in deseados, alPulsar)
+                    Fila(ev, ev.appid in poseidos, ev.appid in deseados, alPulsar, alMarcar)
                     HorizontalDivider()
                 }
             }
@@ -213,8 +215,19 @@ private fun Listado(
 }
 
 @Composable
-private fun Fila(ev: Evento, lotengo: Boolean, lodeseo: Boolean, alPulsar: (Evento) -> Unit) {
+private fun Fila(
+    ev: Evento,
+    lotengo: Boolean,
+    lodeseo: Boolean,
+    alPulsar: (Evento) -> Unit,
+    alMarcar: (Int, Boolean) -> Unit,
+) {
     ListItem(
+        // Steam no reporta la posesion de los free-to-play sin jugar, asi que corregirlo
+        // tiene que costar un toque desde la lista, no abrir una ficha.
+        trailingContent = {
+            Checkbox(checked = lotengo, onCheckedChange = { alMarcar(ev.appid, it) })
+        },
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(ev.titulo, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f, fill = false))
