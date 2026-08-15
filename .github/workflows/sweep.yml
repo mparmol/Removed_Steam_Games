@@ -50,6 +50,9 @@ jobs:
   fusionar:
     needs: shards
     runs-on: ubuntu-latest
+    # `secrets` no es un contexto valido en un `if:` de step; `env` si.
+    env:
+      FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -81,8 +84,7 @@ jobs:
         run: bash scripts/feed-publicar.sh
 
       - name: Notificar
-        if: ${{ secrets.FCM_SERVICE_ACCOUNT != '' }}
+        if: env.FCM_SERVICE_ACCOUNT != ''
         env:
-          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           DIR_FEED: feedrepo/feed
         run: node src/notificar.js

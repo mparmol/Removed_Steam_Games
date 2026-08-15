@@ -20,6 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ventana_perdida: ${{ steps.ciclo.outputs.ventana_perdida }}
+    # El contexto `secrets` NO existe dentro de un `if:` de step (solo `env`), asi que
+    # el secret se expone aqui para poder condicionar el paso de notificacion.
+    env:
+      FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,9 +53,8 @@ jobs:
 
       # Se salta solo mientras no exista el secret, para que el resto funcione igual
       - name: Notificar
-        if: ${{ secrets.FCM_SERVICE_ACCOUNT != '' }}
+        if: env.FCM_SERVICE_ACCOUNT != ''
         env:
-          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           DIR_FEED: feedrepo/feed
         run: node src/notificar.js
 
