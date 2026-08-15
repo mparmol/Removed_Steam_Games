@@ -124,25 +124,41 @@ export async function consultarMuchos(appids, limitador, alAvanzar) {
  */
 export async function enumerarCatalogo(limitador, alAvanzar) {
   const POR_PAGINA = 1000;
-  const todos = [];
-  let total = Infinity;
 
-  for (let inicio = 0; inicio < total; inicio += POR_PAGINA) {
-    const entrada = {
-      query: { start: inicio, count: POR_PAGINA },
-      context: { language: 'english', country_code: 'ES', steam_realm: 1 },
-    };
-    const url = `https://api.steampowered.com/IStoreQueryService/Query/v1/?input_json=${encodeURIComponent(JSON.stringify(entrada))}`;
-    const res = await pedir(url, { limitador });
+  // La consulta por defecto NO trae demos ni bandas sonoras, y solo parte del DLC:
+  // medido, 304.484 por defecto frente a 35.597 demos, 10.924 music y 60.417 dlc por
+  // separado. Con solo la consulta base el catalogo salia con 1 demo y 8 soundtracks,
+  // y las retiradas de esos tipos eran invisibles para el sistema.
+  const CONSULTAS = [
+    ['base', undefined],
+    ['demos', { type_filters: { include_demos: true } }],
+    ['music', { type_filters: { include_music: true } }],
+    ['dlc', { type_filters: { include_dlc: true } }],
+    ['software', { type_filters: { include_software: true } }],
+    ['video', { type_filters: { include_video: true } }],
+  ];
 
-    total = res?.response?.metadata?.total_matching_records ?? 0;
-    const ids = (res?.response?.ids ?? []).map((x) => Number(x.appid)).filter(Boolean);
-    if (ids.length === 0) break;
+  const todos = new Set();
 
-    todos.push(...ids);
-    alAvanzar?.(todos.length, total);
+  for (const [nombre, filters] of CONSULTAS) {
+    let total = Infinity;
+    for (let inicio = 0; inicio < total; inicio += POR_PAGINA) {
+      const entrada = {
+        query: { start: inicio, count: POR_PAGINA, ...(filters ? { filters } : {}) },
+        context: { language: 'english', country_code: 'ES', steam_realm: 1 },
+      };
+      const url = `https://api.steampowered.com/IStoreQueryService/Query/v1/?input_json=${encodeURIComponent(JSON.stringify(entrada))}`;
+      const res = await pedir(url, { limitador });
+
+      total = res?.response?.metadata?.total_matching_records ?? 0;
+      const ids = (res?.response?.ids ?? []).map((x) => Number(x.appid)).filter(Boolean);
+      if (ids.length === 0) break;
+
+      for (const id of ids) todos.add(id);
+      alAvanzar?.(todos.size, nombre, Math.min(inicio + POR_PAGINA, total), total);
+    }
   }
-  return [...new Set(todos)];
+  return [...todos];
 }
 
 /**

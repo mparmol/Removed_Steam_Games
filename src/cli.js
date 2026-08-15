@@ -95,12 +95,16 @@ async function bootstrap() {
   // Ya no hace falta fuerza bruta sobre 5,2M de appids: IStoreQueryService enumera
   // el catalogo real (~304k) sin API key, 1.000 por peticion.
   console.log('enumerando el catalogo...');
-  const catalogo = await enumerarCatalogo(limitador, (h, t) => {
-    if (h % 20000 === 0 || h >= t) console.log(`  ${h}/${t}`);
+  let ultimoAviso = 0;
+  const catalogo = await enumerarCatalogo(limitador, (unicos, consulta, hechos, total) => {
+    if (unicos - ultimoAviso >= 25000) { ultimoAviso = unicos; console.log(`  ${consulta}: ${hechos}/${total}  (unicos acumulados: ${unicos})`); }
   });
   console.log(`catalogo: ${catalogo.length} apps\n`);
 
-  const objetivos = catalogo.filter((a, i) => i % deTotal === shard);
+  // Reparto por appid, NO por indice: cada shard enumera por su cuenta y el orden de
+  // la lista puede no coincidir entre jobs, con lo que un reparto posicional dejaria
+  // huecos y solapes.
+  const objetivos = catalogo.filter((a) => a % deTotal === shard);
   console.log(`== bootstrap shard ${shard}/${deTotal}: ${objetivos.length} apps a consultar ==`);
   const encontradas = {};
 
