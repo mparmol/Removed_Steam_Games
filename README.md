@@ -1,77 +1,107 @@
-# Juegos retirados de Steam
+# Steam Removal Watch
 
-Avisa por notificación cuando un juego **va a desaparecer** de Steam, cuando **acaba de desaparecer**,
-o cuando algo se pone **gratis para siempre**.
+Get a notification when a Steam game is **about to be pulled**, when it **has just been pulled**,
+or when something becomes **free to keep**.
 
-Sin servidor: la detección corre en GitHub Actions, el feed lo sirve GitHub Pages y las notificaciones
-van por Firebase Cloud Messaging. La app Android solo lee un JSON público — no hay cuentas, ni login,
-ni datos personales en ninguna parte.
+No server: detection runs on GitHub Actions, the feed is served by GitHub Pages, and notifications go
+through Firebase Cloud Messaging. The Android app just reads a public JSON file — no accounts, no login,
+no personal data anywhere.
 
-## Cómo detecta
+## The point: advance warning
 
-| Qué | Cómo | Latencia |
+Knowing that a game *was* removed is archaeology. Knowing it *will be* removed is what lets you buy it in
+time, so most of the effort goes into warning sources:
+
+| Source | What it adds | Cost per cycle |
 |---|---|---|
-| Retirada anunciada | Hilo [RemGC](https://steamcommunity.com/groups/RemGC/discussions/9/1736595131052961774/) del grupo Removed Games Collectors | 15-40 min desde que se publica |
-| Retirada consumada | PICS marca candidatos → `IStoreBrowseService/GetItems` confirma `visible: false` | 15-40 min |
-| Gratis ahora | Búsqueda de la tienda con `specials=1&maxprice=free` | 15-40 min |
-| Gratis próximamente | Paquetes de PICS con `billingtype 12` y ventana temporal | días de antelación |
+| [Games at risk of removal](https://store.steampowered.com/curator/31857481-Games-at-risk-of-removal/) curator | Exact removal date and current price | 1 request |
+| [RemGC thread](https://steamcommunity.com/groups/RemGC/discussions/9/1736595131052961774/) | Human curation, catches what others miss | 2 requests |
+| [delistedgames.com](https://delistedgames.com/) | Second aggregator, days of lead time | 1 request |
+| Developer announcements | The primary source, but there is no global feed | ~120 apps, rotating |
 
-### Tres cosas que no son obvias
+Warnings fire **the moment they are spotted** — publishers sometimes bring a removal forward, so waiting is
+not an option. A second *last call* notification fires when fewer than 72 hours remain.
 
-**PICS no ve las promociones gratuitas preconfiguradas.** Los `starttime`/`expirytime` de un paquete se
-fijan cuando la promo se *configura*, que puede ser días antes de empezar, y es entonces cuando el paquete
-cambia. Se comprobó con Deponia: estaba gratis en vivo y no aparecía en la ventana de PICS. Por eso la
-fuente de verdad de "gratis ahora" es la búsqueda de la tienda, y PICS solo sirve de preaviso.
+**There is no global feed of Steam developer announcements.** The event calendar returns 14 events in 12
+hours without a session (it is personalised), and the store news feed is just Valve's own blog. So
+announcements are polled app by app, on a budget, with a priority queue: whatever a human source just
+flagged, then whatever just changed in PICS, then a rotating sweep of the rest.
 
-**PICS falla en silencio.** Su ventana de histórico es de ~7.200 changenumbers (~9,5 h), y al salirte de
-ella no da error: devuelve `{appChanges: [], packageChanges: []}`, indistinguible de "no ha cambiado nada".
-Por eso se compara el hueco contra un umbral antes de fiarse del resultado, y si se pasa se encadena un
-barrido completo.
+## Removal detection
 
-**El catálogo ya no se puede enumerar gratis.** `ISteamApps/GetAppList` da 404 en todas sus versiones e
-`IStoreService/GetAppList` exige API key. El universo se construye por fuerza bruta sobre el espacio de
-appids (solo ~4% está visible: unas 200.000 apps de 5,2M).
+| What | How | Latency |
+|---|---|---|
+| Just removed | PICS flags candidates → `IStoreBrowseService/GetItems` confirms | 15-40 min |
+| Free right now | Store search with `specials=1&maxprice=free` | 15-40 min |
+| Free soon | PICS packages with `billingtype 12` and a time window | days ahead |
 
-## Límites de Steam
+### Four things that are not obvious
 
-Medido: **~120 peticiones por ventana de ~5 min y por IP**, con independencia de la velocidad. Una vuelta
-completa al catálogo cuesta ~1 h desde una sola IP. Como cada job de Actions estrena IP, el barrido se
-reparte en shards y baja a minutos.
+**`visible` is relative to the country.** Querying only from Spain, 4 of 7 removal candidates turned out to
+be region blocks: Earth:Revival and カラオケJOYSOUND are alive in JP, Snowbreak and BSide in CN. A 57% false
+positive rate. Even the store page 302 redirect is region-dependent. Candidates are now confirmed against
+ES, US, JP and CN, and only count as removed if invisible in all of them. Region blocks get their own feed
+entry and never trigger a push.
 
-## Uso
+**Price has to be captured before removal.** Once a game is gone, Steam returns no price through any
+endpoint. The last known price is stored per app so alerts can say what it used to cost.
+
+**PICS fails silently.** Its history window is ~7,200 changenumbers (~9.5 h), and stepping outside it does
+not raise an error: it returns `{appChanges: [], packageChanges: []}`, indistinguishable from "nothing
+changed". The gap is checked against a threshold before the result is trusted, and a full sweep is chained
+if it is exceeded.
+
+**The catalogue can be enumerated after all.** `ISteamApps/GetAppList` is dead (404 on every version) and
+`IStoreService/GetAppList` demands an API key, but `IStoreQueryService/Query` works without one: 1,000 ids
+per request over ~304,000 records. That is ~305 requests instead of brute-forcing 5.2M appids.
+
+## Steam rate limits
+
+Measured: **~120 requests per ~5 min window, per IP**, regardless of how fast they are sent. A full pass over
+the catalogue costs ~1 h from a single IP. Since every Actions job gets a fresh IP, sweeps are sharded and
+drop to minutes.
+
+## Usage
 
 ```bash
 npm ci
-npm test                      # 12 pruebas, sin red
-npm run test:integracion      # 6 pruebas contra Steam
+npm test                      # 12 tests, no network
+npm run test:integracion      # 8 tests against Steam
 
-node src/cli.js watch --dry-run    # ciclo completo sin escribir nada
-node src/cli.js estado             # qué hay guardado
+node src/cli.js watch --dry-run    # full cycle, writes nothing
+node src/cli.js estado             # what is currently stored
 ```
 
-Comandos: `watch`, `sweep --shard N --of M`, `bootstrap --shard N --of M`, `fusionar --entradas dir`,
-`estado`. Con `--remoto` el estado se lee y se escribe en la Release `data-state` en vez de en `.data/`.
+Commands: `watch`, `sweep --shard N --of M`, `bootstrap --shard N --of M`, `fusionar --entradas dir`,
+`estado`. With `--remoto`, state is read from and written to the `data-state` release instead of `.data/`.
 
-## Puesta en marcha
+## Setup
 
-1. Fusionar a `main` (los crons solo se ejecutan desde la rama por defecto).
-2. Lanzar **Bootstrap del catálogo** a mano. Sin catálogo previo, `watch` no tiene con qué comparar.
-3. Settings → Pages → servir desde la rama `data`, carpeta raíz.
-4. Secret `FCM_SERVICE_ACCOUNT` con el JSON de la cuenta de servicio de Firebase. Mientras no exista,
-   todo funciona salvo el envío de notificaciones, que se salta solo.
-5. El APK sale como artefacto del workflow **Compilar APK**.
+1. Run **Bootstrap del catalogo** once, by hand. Without a prior snapshot there is nothing to compare
+   against, so removals cannot be detected. Warning sources work without it.
+2. Settings → Pages → serve from the `data` branch, root folder.
+3. Secret `FCM_SERVICE_ACCOUNT` with the Firebase service account JSON. Until it exists everything works
+   except sending notifications, which skips itself.
+4. The APK is an artifact of the **Compilar APK** workflow.
 
-## Estructura
+## Layout
 
 ```
 src/steam/      pics, store (GetItems), promos
-src/sources/    remgc
+src/sources/    curator, remgc, delisted, anuncios
 src/core/       estado, eventos, feed, ciclo
-src/notificar.js  envío a FCM por topics
-android/        app Kotlin + Compose
-spike/          scripts desechables de la investigación previa
+src/notificar.js  FCM delivery by topic
+android/        Kotlin + Compose app
+spike/          throwaway scripts from the feasibility research
 ```
 
-El estado (~200k apps) vive como asset de una Release, no en el repo: commitearlo cada 15 minutos
-añadiría megas al historial cada día. El feed va a la rama huérfana `data`, reescrita como un único
-commit en cada publicación.
+State (~200k apps) lives as a release asset rather than in the repo: committing it every 15 minutes would
+add megabytes of history daily. The feed goes to the orphan `data` branch, rewritten as a single commit on
+every publish.
+
+## Notification design
+
+Topics, not devices: unsubscribing from a category stops the traffic at the source. Urgent events
+(free-to-keep, announced removals, removed games) arrive individually, capped at 10 per cycle and ordered
+last-call first; everything else is grouped into one digest. A cold start publishes to the feed but sends
+nothing, since it would otherwise deliver the entire backlog at once.
