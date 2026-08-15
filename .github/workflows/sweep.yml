@@ -1,0 +1,88 @@
+name: Barrido
+
+# Repasa todo el catalogo conocido. Es la red de seguridad contra los huecos de PICS.
+#
+# El limite de Steam es de ~120 peticiones por ventana de 5 min y POR IP, asi que una
+# vuelta completa cuesta ~1 h desde una sola IP. Cada job de Actions estrena IP: con
+# 12 shards en paralelo baja a unos minutos.
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: barrido
+  cancel-in-progress: false
+
+jobs:
+  shards:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --omit=dev
+
+      - name: IP de este runner
+        run: curl -s https://api.ipify.org; echo
+
+      - name: Barrer shard ${{ matrix.shard }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node src/cli.js sweep --remoto --shard ${{ matrix.shard }} --of 12 --salida shard-${{ matrix.shard }}.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: barrido-${{ matrix.shard }}
+          path: shard-${{ matrix.shard }}.json
+          retention-days: 1
+
+  fusionar:
+    needs: shards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --omit=dev
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: .data/shards
+          pattern: barrido-*
+          merge-multiple: false
+
+      - name: Recuperar el feed publicado
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/feed-preparar.sh
+
+      - name: Fusionar shards y emitir eventos
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIR_FEED: feedrepo/feed
+        run: node src/cli.js fusionar --remoto --entradas .data/shards
+
+      - name: Publicar feed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/feed-publicar.sh
+
+      - name: Notificar
+        if: ${{ secrets.FCM_SERVICE_ACCOUNT != '' }}
+        env:
+          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+          DIR_FEED: feedrepo/feed
+        run: node src/notificar.js
