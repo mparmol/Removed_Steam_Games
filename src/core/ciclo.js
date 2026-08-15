@@ -386,6 +386,14 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       };
       if (previa?.clave === clave && previa.avisado) continue;
 
+      // Los editores aplazan: Fenrir Banquet anunciaba retirada el 17 jul 2026 y un
+      // mes despues seguia a la venta por 1,99 €. Mantener esa fecha como "vence"
+      // enganaria al usuario y ademas descoloca el orden de proximas retiradas.
+      const caducada = f.fecha_retirada && Date.parse(f.fecha_retirada) < Date.now();
+      const detalle = caducada
+        ? `${f.nota} (la fecha anunciada ya pasó y sigue a la venta)`
+        : f.nota;
+
       estado.previstas[f.appid].avisado = true;
       eventos.push(crearEvento({
         tipo: 'retirada_anunciada',
@@ -395,8 +403,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         precio: f.precio,
         fuente: 'curador',
         anuncio: f.anuncio,
-        detalle: f.nota,
-        vence: f.fecha_retirada,
+        detalle,
+        vence: caducada ? null : f.fecha_retirada,
         confianza: 'confirmado',
       }));
     }
