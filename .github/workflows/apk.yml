@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   apk:
@@ -34,7 +34,15 @@ jobs:
 
       - name: Compilar
         working-directory: android
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee ../build.log
+
+      - name: Publicar log si falla
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/publicar-log.sh build.log apk
 
       - uses: actions/upload-artifact@v4
         with:
