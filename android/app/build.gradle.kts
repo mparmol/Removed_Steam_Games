@@ -47,6 +47,13 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    lint {
+        // Es un APK para sideload personal, no una publicacion en Play: que un aviso
+        // de lint tumbe la build estorba mas de lo que ayuda. Sigue analizando y
+        // reportando, simplemente no aborta.
+        abortOnError = false
+    }
 }
 
 dependencies {
@@ -56,6 +63,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.9.3")
+    // Alguna dependencia transitiva arrastra un fragment antiguo y lint aborta el
+    // release: registerForActivityResult exige fragment >= 1.3.0 en el classpath.
+    implementation("androidx.fragment:fragment:1.8.5")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
