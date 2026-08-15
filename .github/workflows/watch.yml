@@ -49,17 +49,20 @@ jobs:
           DIR_FEED: feedrepo/feed
         run: node src/cli.js watch --remoto
 
-      - name: Publicar feed
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/feed-publicar.sh
-
-      # Se salta solo mientras no exista el secret, para que el resto funcione igual
+      # ANTES de publicar: el notificador deja constancia de lo enviado en
+      # notificados.json y arranque.json, y si se publicara primero esas anotaciones
+      # se perderian y se reenviaria todo en cada ciclo.
+      # Se salta solo mientras no exista el secret, para que el resto funcione igual.
       - name: Notificar
         if: env.FCM_SERVICE_ACCOUNT != ''
         env:
           DIR_FEED: feedrepo/feed
         run: node src/notificar.js
+
+      - name: Publicar feed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/feed-publicar.sh
 
   # Si PICS perdio la ventana, el barrido es la unica forma de saber que nos hemos
   # perdido: Steam devuelve listas vacias sin avisar, no da error.
@@ -67,6 +70,8 @@ jobs:
     needs: ciclo
     if: needs.ciclo.outputs.ventana_perdida == 'true'
     uses: ./.github/workflows/sweep.yml
+    with:
+      encadenado: true
     permissions:
       contents: write
     secrets: inherit

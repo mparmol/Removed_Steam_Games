@@ -215,8 +215,35 @@ private fun Ajustes() {
     val ctx = LocalContext.current
     val ambito = rememberCoroutineScope()
     val activos by Topics.activos(ctx).collectAsStateWithLifecycle(initialValue = emptySet())
+    var diagnostico by remember { mutableStateOf<String?>(null) }
+    var comprobando by remember { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize()) {
+        item {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Diagnóstico de notificaciones", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Si el feed se actualiza pero no llegan avisos, casi siempre es que el " +
+                        "móvil no está suscrito. Esto lo comprueba y lo reintenta.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Button(
+                    onClick = {
+                        comprobando = true
+                        ambito.launch {
+                            diagnostico = Topics.diagnostico(ctx)
+                            comprobando = false
+                        }
+                    },
+                    enabled = !comprobando,
+                ) { Text(if (comprobando) "Comprobando…" else "Comprobar y reintentar") }
+
+                diagnostico?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            HorizontalDivider()
+        }
         items(Topics.TODOS, key = { it.id }) { t ->
             ListItem(
                 headlineContent = { Text(t.etiqueta) },

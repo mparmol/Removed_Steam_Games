@@ -53,4 +53,35 @@ object Topics {
     suspend fun sincronizar(ctx: Context, activos: Set<String>) {
         for (t in TODOS) aplicar(t.id, t.id in activos)
     }
+
+    /**
+     * Vuelve a suscribir y DEVUELVE lo que ha pasado.
+     *
+     * `aplicar` traga los errores para no romper el arranque, lo cual deja ciego al
+     * usuario si la suscripcion falla: el backend envia, FCM acepta el envio a un
+     * topic sin suscriptores sin dar error, y al movil no llega nada. Esto lo destapa.
+     */
+    suspend fun diagnostico(ctx: Context): String = try {
+        val fm = FirebaseMessaging.getInstance()
+        val token = fm.token.await()
+        val activos = activos(ctx).first()
+
+        var ok = 0
+        val fallos = mutableListOf<String>()
+        for (t in TODOS) {
+            try {
+                if (t.id in activos) fm.subscribeToTopic(t.id).await() else fm.unsubscribeFromTopic(t.id).await()
+                ok++
+            } catch (e: Exception) {
+                fallos.add("${t.id}: ${e.message}")
+            }
+        }
+        buildString {
+            append("Token FCM: ${token.take(22)}…\n")
+            append("Suscrito a $ok de ${TODOS.size} categorías")
+            if (fallos.isNotEmpty()) append("\n\nFallos:\n" + fallos.joinToString("\n"))
+        }
+    } catch (e: Exception) {
+        "NO se pudo obtener el token FCM.\n${e::class.simpleName}: ${e.message}"
+    }
 }

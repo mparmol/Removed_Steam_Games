@@ -93,7 +93,9 @@ async function principal() {
   // cadena Actions -> FCM -> movil funciona de verdad.
   const marcaFrio = join(DIR_FEED, 'arranque.json');
   const frio = await leerJson(marcaFrio, null);
-  if (frio) {
+  // `enviado` marca que ya se mando: sin esta comprobacion el saludo se repetiria
+  // en cada ciclo, porque el objeto de "ya enviado" tambien es truthy.
+  if (frio && !frio.enviado) {
     const token0 = await conseguirToken(cuenta);
     await enviar(token0, cuenta.project_id, {
       topic: 'resumen',

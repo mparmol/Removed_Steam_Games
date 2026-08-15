@@ -10,13 +10,21 @@ on:
     - cron: '0 4 * * *'
   workflow_dispatch:
   workflow_call:
+    inputs:
+      encadenado:
+        description: 'Lo llama Vigilancia, que ya retiene el grupo de concurrencia'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
-# Mismo grupo que vigilancia y bootstrap: comparten el asset de estado.
+# Comparte grupo con vigilancia y bootstrap porque los tres escriben el mismo asset
+# de estado... salvo cuando lo invoca Vigilancia: ahi el padre YA retiene el grupo y
+# pedirlo otra vez es un abrazo mortal (el hijo espera al padre y el padre al hijo).
+# GitHub lo detecta y cancela el run entero.
 concurrency:
-  group: estado
+  group: ${{ inputs.encadenado && format('estado-hijo-{0}', github.run_id) || 'estado' }}
   cancel-in-progress: false
 
 jobs:
@@ -79,13 +87,14 @@ jobs:
           DIR_FEED: feedrepo/feed
         run: node src/cli.js fusionar --remoto --entradas .data/shards
 
-      - name: Publicar feed
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/feed-publicar.sh
-
+      # Notificar antes de publicar: si no, sus anotaciones de "ya enviado" se pierden
       - name: Notificar
         if: env.FCM_SERVICE_ACCOUNT != ''
         env:
           DIR_FEED: feedrepo/feed
         run: node src/notificar.js
+
+      - name: Publicar feed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/feed-publicar.sh
