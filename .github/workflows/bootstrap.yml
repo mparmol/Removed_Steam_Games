@@ -1,0 +1,82 @@
+name: Bootstrap del catalogo
+
+# Se ejecuta UNA VEZ, a mano. Construye el universo inicial de appids sondeando el
+# espacio entero por fuerza bruta, porque ya no existe ninguna forma gratuita de
+# enumerar el catalogo: ISteamApps/GetAppList da 404 en todas sus versiones e
+# IStoreService/GetAppList exige API key.
+#
+# Solo ~4% de los appids estan visibles, asi que de 5,2M salen unas 200.000 apps.
+# A ~100 peticiones de 200 appids por ventana de 5 min y por IP, cada shard tarda
+# poco mas de una hora; con 20 shards en paralelo el total ronda ese mismo rato.
+on:
+  workflow_dispatch:
+    inputs:
+      hasta:
+        description: 'Appid maximo a sondear'
+        default: '5200000'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  shards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --omit=dev
+
+      - name: IP de este runner
+        run: curl -s https://api.ipify.org; echo
+
+      - name: Sondear shard ${{ matrix.shard }}
+        run: node src/cli.js bootstrap --shard ${{ matrix.shard }} --of 20 --hasta ${{ inputs.hasta }} --salida shard-${{ matrix.shard }}.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-${{ matrix.shard }}
+          path: shard-${{ matrix.shard }}.json
+          retention-days: 1
+
+  fusionar:
+    needs: shards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --omit=dev
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: .data/shards
+          pattern: bootstrap-*
+
+      - name: Recuperar el feed publicado
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/feed-preparar.sh
+
+      # En el bootstrap no hay estado previo con el que comparar, asi que no genera
+      # eventos: solo deja el catalogo listo para que watch y sweep detecten cambios.
+      - name: Construir el estado inicial
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIR_FEED: feedrepo/feed
+        run: node src/cli.js fusionar --remoto --entradas .data/shards
+
+      - name: Resumen
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node src/cli.js estado --remoto

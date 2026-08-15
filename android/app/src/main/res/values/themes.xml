@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose dibuja toda la interfaz; el tema de sistema solo aporta la ventana. -->
+    <style name="Theme.RemovedSteamGames" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/fondo</item>
+        <item name="android:windowBackground">@color/fondo</item>
+    </style>
+</resources>

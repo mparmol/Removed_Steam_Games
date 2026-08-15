@@ -1,0 +1,51 @@
+name: Compilar APK
+
+# Los runners de ubuntu ya traen el SDK de Android, asi que la app se compila aqui
+# y el APK sale como artefacto listo para instalar por sideload.
+on:
+  push:
+    paths:
+      - 'android/**'
+      - 'google-services.json'
+      - '.github/workflows/apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # google-services.json vive en la raiz del repo; el plugin lo busca en app/
+      - name: Colocar google-services.json
+        run: cp google-services.json android/app/google-services.json
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Compilar
+        working-directory: android
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee ../build.log
+
+      - name: Publicar log si falla
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/publicar-log.sh build.log apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 30

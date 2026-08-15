@@ -1,0 +1,18 @@
+{
+  "name": "removed-steam-games",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Detecta juegos retirados de Steam y promociones gratuitas, y avisa por notificacion",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "watch": "node src/cli.js watch",
+    "sweep": "node src/cli.js sweep",
+    "bootstrap": "node src/cli.js bootstrap",
+    "test": "node --test test/unidad.test.js",
+    "test:integracion": "node --test test/integracion.test.js"
+  },
+  "dependencies": {
+    "steam-user": "^5.2.0"
+  }
+}
