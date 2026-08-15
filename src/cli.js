@@ -222,10 +222,13 @@ async function fusionar() {
  * el feed debe quedar poblado, pero el movil no debe recibir el historico entero.
  */
 async function marcarComoNotificados(eventos) {
-  const ruta = join(process.env.DIR_FEED ?? 'data/feed', 'notificados.json');
+  const dir = process.env.DIR_FEED ?? 'data/feed';
+  const ruta = join(dir, 'notificados.json');
   let previos = [];
   try { previos = JSON.parse(await readFile(ruta, 'utf8')); } catch { /* aun no existe */ }
   await writeFile(ruta, JSON.stringify([...eventos.map((e) => e.id), ...previos].slice(0, 3000)));
+  // marca para que el notificador mande un unico aviso de puesta en marcha
+  await writeFile(join(dir, 'arranque.json'), JSON.stringify({ eventos: eventos.length, fecha: new Date().toISOString() }));
 }
 
 /** Expone valores al workflow via $GITHUB_OUTPUT. */

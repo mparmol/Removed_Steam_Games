@@ -87,6 +87,27 @@ async function principal() {
 
   const eventos = await leerJson(join(DIR_FEED, 'latest.json'), []);
   const yaEnviados = new Set(await leerJson(RUTA_NOTIFICADOS, []));
+
+  // Tras un arranque en frio no se notifica nada (seria el historico entero de golpe),
+  // asi que se manda un unico aviso de puesta en marcha: sirve para comprobar que la
+  // cadena Actions -> FCM -> movil funciona de verdad.
+  const marcaFrio = join(DIR_FEED, 'arranque.json');
+  const frio = await leerJson(marcaFrio, null);
+  if (frio) {
+    const token0 = await conseguirToken(cuenta);
+    await enviar(token0, cuenta.project_id, {
+      topic: 'resumen',
+      notification: {
+        title: 'Vigilancia en marcha',
+        body: `${frio.eventos} avisos cargados. A partir de ahora solo lo nuevo.`,
+      },
+      data: { tipo: 'arranque', total: String(frio.eventos) },
+      android: { priority: 'normal', notification: { channel_id: 'resumen' } },
+    });
+    await writeFile(marcaFrio, JSON.stringify({ enviado: new Date().toISOString() }));
+    console.log('aviso de puesta en marcha enviado');
+    return;
+  }
   // los bloqueos regionales se consultan en la app, no interrumpen nunca
   const pendientes = eventos.filter((e) => !yaEnviados.has(e.id) && !SOLO_FEED.has(e.tipo));
 
@@ -102,7 +123,9 @@ async function principal() {
   // Tope de notificaciones individuales por ciclo. Sin esto, una tanda del curador
   // (que puede traer 20 avisos de golpe) vacia la bateria y entrena al usuario a
   // ignorar la app, que es justo lo contrario de lo que queremos.
-  const MAX_INDIVIDUALES = Number(process.env.MAX_INDIVIDUALES ?? 5);
+  // Un aviso de retirada nunca debe quedar sepultado en el resumen: a veces adelantan
+  // el borrado respecto a la fecha anunciada, asi que lo que importa es enterarse ya.
+  const MAX_INDIVIDUALES = Number(process.env.MAX_INDIVIDUALES ?? 10);
 
   const prioridad = (e) =>
     (e.fuente === 'ultima_llamada' ? 0 : e.tipo === 'gratis_activo' ? 1 : e.vence ? 2 : 3);
