@@ -45,13 +45,23 @@ export async function guardarEstado(estado, ruta = RUTA_ESTADO) {
 
 // --- acceso comodo a la tabla de apps -----------------------------------------
 
+// fila = [visible, nombre, tipo, precio]
+// El precio se guarda porque una vez retirado el juego Steam ya no lo devuelve por
+// ninguna via: si no se captura antes, la alerta no puede decir cuanto costaba.
 export const leerApp = (estado, appid) => {
   const fila = estado.apps[appid];
-  return fila ? { visible: fila[0] === 1, nombre: fila[1], tipo: fila[2] } : null;
+  return fila ? { visible: fila[0] === 1, nombre: fila[1], tipo: fila[2], precio: fila[3] ?? null } : null;
 };
 
-export const escribirApp = (estado, appid, { visible, nombre, tipo }) => {
-  estado.apps[appid] = [visible ? 1 : 0, nombre ?? '', tipo ?? 'otro'];
+export const escribirApp = (estado, appid, { visible, nombre, tipo, precio }) => {
+  const previo = estado.apps[appid];
+  estado.apps[appid] = [
+    visible ? 1 : 0,
+    nombre ?? '',
+    tipo ?? 'otro',
+    // si ya no es visible no habra precio nuevo: conservamos el ultimo conocido
+    precio ?? previo?.[3] ?? null,
+  ];
 };
 
 export const contarVisibles = (estado) =>

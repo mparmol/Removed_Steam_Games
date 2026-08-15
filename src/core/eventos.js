@@ -54,6 +54,8 @@ export function crearEvento(datos) {
     app_type: datos.app_type ?? 'otro',
     detectado,
     fuente: datos.fuente,
+    // ultimo precio conocido antes de desaparecer; Steam ya no lo da una vez retirado
+    precio: datos.precio ?? null,
     vence: datos.vence ?? null,
     enlaces: enlacesDe(datos.appid, datos.nombre, datos.anuncio),
     confianza: datos.confianza ?? 'provisional',

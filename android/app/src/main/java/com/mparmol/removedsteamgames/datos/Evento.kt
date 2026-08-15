@@ -12,6 +12,8 @@ data class Evento(
     val app_type: String = "otro",
     val detectado: String = "",
     val fuente: String = "",
+    /** Último precio conocido antes de desaparecer; Steam ya no lo da una vez retirado. */
+    val precio: String? = null,
     val vence: String? = null,
     val enlaces: Enlaces = Enlaces(),
     val confianza: String = "confirmado",

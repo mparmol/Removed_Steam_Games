@@ -24,17 +24,30 @@ export function normalizarTipo(t) {
 }
 
 /**
- * Consulta el estado de un lote de appids.
- * @returns {Promise<Map<number, {appid:number, visible:boolean, nombre:string, tipo:string, gratis:boolean}>>}
+ * Paises con los que se confirma una retirada.
+ *
+ * Medido: consultando SOLO desde Espana, 4 de 7 candidatos a retirada resultaron
+ * estar simplemente bloqueados por region (Earth:Revival y カラオケJOYSOUND visibles
+ * en JP; Snowbreak y BSide visibles en CN). Un 57% de falsos positivos. La bandera
+ * `visible` es relativa al pais, asi que una retirada solo es tal si no se ve en
+ * NINGUNO de estos mercados.
  */
-export async function consultarLote(appids, limitador) {
+export const PAISES_CONFIRMACION = ['ES', 'US', 'JP', 'CN'];
+
+/**
+ * Consulta el estado de un lote de appids.
+ * @returns {Promise<Map<number, {appid:number, visible:boolean, nombre:string, tipo:string, gratis:boolean, precio:string|null}>>}
+ */
+export async function consultarLote(appids, limitador, pais = 'ES') {
   if (appids.length === 0) return new Map();
   if (appids.length > LOTE_MAX) throw new Error(`lote de ${appids.length} supera el maximo de ${LOTE_MAX}`);
 
   const entrada = {
     ids: appids.map((appid) => ({ appid: Number(appid) })),
-    context: { language: 'spanish', country_code: 'ES', steam_realm: 1 },
-    data_request: { include_basic_info: true, include_release: true },
+    context: { language: 'spanish', country_code: pais, steam_realm: 1 },
+    // el precio se pide para poder guardarlo ANTES de que el juego desaparezca:
+    // una vez retirado, Steam ya no lo devuelve por ninguna via
+    data_request: { include_basic_info: true, include_release: true, include_all_purchase_options: true },
   };
   const url = `${GETITEMS}?input_json=${encodeURIComponent(JSON.stringify(entrada))}`;
   const res = await pedir(url, { limitador });
@@ -43,6 +56,7 @@ export async function consultarLote(appids, limitador) {
   for (const item of res?.response?.store_items ?? []) {
     const appid = Number(item.appid ?? item.id);
     if (!appid) continue;
+    const compra = item.best_purchase_option ?? item.purchase_options?.[0] ?? null;
     salida.set(appid, {
       appid,
       // `visible: false` cubre tanto "retirado" como "nunca existio". No los distingue,
@@ -51,7 +65,32 @@ export async function consultarLote(appids, limitador) {
       nombre: item.name ?? '',
       tipo: normalizarTipo(item.type),
       gratis: item.is_free === true,
+      precio: compra?.formatted_final_price ?? compra?.formatted_original_price ?? null,
     });
+  }
+  return salida;
+}
+
+/**
+ * Confirma si unos appids estan retirados de VERDAD, mirandolos en varios mercados.
+ * Solo se llama sobre candidatos, no sobre todo el catalogo, asi que el coste extra
+ * es despreciable.
+ *
+ * @returns {Promise<Map<number, {retirado:boolean, visibleEn:string[]}>>}
+ */
+export async function confirmarRetirada(appids, limitador) {
+  const visibleEn = new Map(appids.map((a) => [Number(a), []]));
+
+  for (const pais of PAISES_CONFIRMACION) {
+    for (let i = 0; i < appids.length; i += LOTE_MAX) {
+      const res = await consultarLote(appids.slice(i, i + LOTE_MAX), limitador, pais);
+      for (const [appid, dato] of res) if (dato.visible) visibleEn.get(appid)?.push(pais);
+    }
+  }
+
+  const salida = new Map();
+  for (const [appid, paises] of visibleEn) {
+    salida.set(appid, { retirado: paises.length === 0, visibleEn: paises });
   }
   return salida;
 }

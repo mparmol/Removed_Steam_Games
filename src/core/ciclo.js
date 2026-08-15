@@ -2,7 +2,7 @@
 
 import { Limitador } from '../lib/http.js';
 import * as pics from '../steam/pics.js';
-import { consultarMuchos, gratisAhora } from '../steam/store.js';
+import { consultarMuchos, gratisAhora, confirmarRetirada } from '../steam/store.js';
 import { promosDePaquetes, promosQueTocanAvisar } from '../steam/promos.js';
 import { comentariosNuevos } from '../sources/remgc.js';
 import { leerApp, escribirApp } from './estado.js';
@@ -44,9 +44,29 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
     });
     resumen.verificadas = vistos.size;
 
+    // La bandera `visible` es RELATIVA AL PAIS: un juego bloqueado en Espana parece
+    // retirado. Medido: 4 de 7 candidatos eran bloqueos regionales, no retiradas.
+    // Por eso los que "desaparecen" se contrastan contra varios mercados antes de nada.
+    const sospechosos = [...vistos.values()]
+      .filter((v) => !v.visible && leerApp(estado, v.appid)?.visible)
+      .map((v) => v.appid);
+
+    const confirmacion = sospechosos.length > 0 ? await confirmarRetirada(sospechosos, limitador) : new Map();
+    if (sospechosos.length > 0) {
+      const regionales = [...confirmacion.values()].filter((c) => !c.retirado).length;
+      registrar(`  ${sospechosos.length} sospechosos: ${sospechosos.length - regionales} retirados, ${regionales} solo bloqueo regional`);
+    }
+
     for (const [appid, ahora] of vistos) {
       const antes = leerApp(estado, appid);
       const pendiente = estado.pendientes[appid];
+
+      // desaparecido solo en algunos mercados: no es una retirada
+      const conf = confirmacion.get(appid);
+      if (conf && !conf.retirado) {
+        registrar(`  ${appid} sigue visible en ${conf.visibleEn.join(',')}: bloqueo regional, no retirada`);
+        continue;
+      }
 
       if (pendiente) {
         // segunda mirada: confirmamos o descartamos
@@ -57,6 +77,7 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
             appid,
             nombre: ahora.nombre || pendiente.nombre,
             app_type: ahora.tipo !== 'otro' ? ahora.tipo : pendiente.app_type,
+            precio: antes?.precio ?? pendiente.precio,
             fuente: 'pics',
             confianza: 'confirmado',
           }));
@@ -70,8 +91,9 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         // el nombre se pierde cuando deja de ser visible: conservamos el que teniamos
         const nombre = ahora.nombre || antes.nombre;
         const app_type = ahora.tipo !== 'otro' ? ahora.tipo : antes.tipo;
-        eventos.push(crearEvento({ tipo, appid, nombre, app_type, fuente: 'pics', confianza: 'provisional' }));
-        estado.pendientes[appid] = { tipo, nombre, app_type, visto: new Date().toISOString() };
+        const precio = antes.precio;
+        eventos.push(crearEvento({ tipo, appid, nombre, app_type, precio, fuente: 'pics', confianza: 'provisional' }));
+        estado.pendientes[appid] = { tipo, nombre, app_type, precio, visto: new Date().toISOString() };
       }
 
       // el estado se actualiza siempre, aunque no haya evento
@@ -79,6 +101,7 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         visible: ahora.visible,
         nombre: ahora.nombre || antes?.nombre || '',
         tipo: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
+        precio: ahora.precio,
       });
     }
   }

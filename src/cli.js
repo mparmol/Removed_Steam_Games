@@ -18,7 +18,7 @@ import { cargarEstado, guardarEstado, contarVisibles, escribirApp, leerApp, RUTA
 import { ejecutarCiclo } from './core/ciclo.js';
 import { publicar } from './core/feed.js';
 import { crearEvento, deduplicar, esUrgente } from './core/eventos.js';
-import { consultarMuchos } from './steam/store.js';
+import { consultarMuchos, confirmarRetirada } from './steam/store.js';
 import { Limitador } from './lib/http.js';
 import { descargarEstado, subirEstado } from './lib/release.js';
 
@@ -99,7 +99,7 @@ async function bootstrap() {
     if (h % 20000 === 0 || h === t) console.log(`  ${h}/${t} (${((h / t) * 100).toFixed(1)}%)  visibles hasta ahora: ${Object.keys(encontradas).length}`);
   }).then((vistos) => {
     // solo guardamos lo visible: ~96% del espacio de appids no existe
-    for (const [appid, d] of vistos) if (d.visible) encontradas[appid] = [1, d.nombre, d.tipo];
+    for (const [appid, d] of vistos) if (d.visible) encontradas[appid] = [1, d.nombre, d.tipo, d.precio];
   });
 
   console.log(`\n${Object.keys(encontradas).length} apps visibles encontradas`);
@@ -118,7 +118,7 @@ async function sweep() {
   await consultarMuchos(mias, limitador, (h, t) => {
     if (h % 5000 === 0 || h === t) console.log(`  ${h}/${t}`);
   }).then((vistos) => {
-    for (const [appid, d] of vistos) observado[appid] = [d.visible ? 1 : 0, d.nombre, d.tipo];
+    for (const [appid, d] of vistos) observado[appid] = [d.visible ? 1 : 0, d.nombre, d.tipo, d.precio];
   });
 
   console.log(`\n${Object.keys(observado).length} apps observadas`);
@@ -141,34 +141,52 @@ async function fusionar() {
   console.log(`== fusionando ${ficheros.length} ficheros de shard ==`);
 
   const eventos = [];
+  const transiciones = [];
   let vistas = 0;
 
   for (const f of ficheros) {
     const parcial = JSON.parse(await readFile(join(dir, f), 'utf8'));
     for (const [appidStr, fila] of Object.entries(parcial.apps)) {
       const appid = Number(appidStr);
-      const ahora = { visible: fila[0] === 1, nombre: fila[1], tipo: fila[2] };
+      const ahora = { visible: fila[0] === 1, nombre: fila[1], tipo: fila[2], precio: fila[3] ?? null };
       vistas++;
 
       const antes = leerApp(estado, appid);
-      // Un cambio detectado por el barrido ya viene mirado dos veces (PICS lo vio o no,
-      // y el barrido lo confirma), asi que sale confirmado directamente.
       if (antes && antes.visible !== ahora.visible) {
-        eventos.push(crearEvento({
-          tipo: ahora.visible ? 'revivido' : 'retirado',
-          appid,
-          nombre: ahora.nombre || antes.nombre,
-          app_type: ahora.tipo !== 'otro' ? ahora.tipo : antes.tipo,
-          fuente: parcial.modo === 'bootstrap' ? 'bootstrap' : 'sweep',
-          confianza: 'confirmado',
-        }));
+        transiciones.push({ appid, antes, ahora, modo: parcial.modo });
       }
       escribirApp(estado, appid, {
         visible: ahora.visible,
         nombre: ahora.nombre || antes?.nombre || '',
         tipo: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
+        precio: ahora.precio,
       });
     }
+  }
+
+  // Los shards consultan solo desde un pais, y `visible` es relativo al pais: sin
+  // este contraste, los bloqueos regionales se cuelan como retiradas (medido: 4 de 7).
+  const desaparecidos = transiciones.filter((t) => !t.ahora.visible).map((t) => t.appid);
+  const confirmacion = desaparecidos.length > 0
+    ? await confirmarRetirada(desaparecidos, new Limitador(100))
+    : new Map();
+
+  for (const t of transiciones) {
+    const conf = confirmacion.get(t.appid);
+    if (conf && !conf.retirado) {
+      console.log(`  ${t.appid} visible en ${conf.visibleEn.join(',')}: bloqueo regional, no retirada`);
+      continue;
+    }
+    eventos.push(crearEvento({
+      tipo: t.ahora.visible ? 'revivido' : 'retirado',
+      appid: t.appid,
+      nombre: t.ahora.nombre || t.antes.nombre,
+      app_type: t.ahora.tipo !== 'otro' ? t.ahora.tipo : t.antes.tipo,
+      precio: t.antes.precio,
+      fuente: t.modo === 'bootstrap' ? 'bootstrap' : 'sweep',
+      // el barrido ya es la segunda mirada, y ademas viene contrastado por paises
+      confianza: 'confirmado',
+    }));
   }
 
   const unicos = deduplicar(eventos);

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { consultarLote, gratisAhora } from '../src/steam/store.js';
+import { consultarLote, gratisAhora, confirmarRetirada } from '../src/steam/store.js';
 import { comentariosNuevos } from '../src/sources/remgc.js';
 import { cambiosDesde, HUECO_MAX } from '../src/steam/pics.js';
 import { Limitador } from '../src/lib/http.js';
@@ -23,6 +23,26 @@ test('deteccion de retirados: casos validados en el spike', async () => {
 
   assert.equal(r.get(620).nombre, 'Portal 2');
   assert.equal(r.get(620).tipo, 'game');
+});
+
+test('un bloqueo regional NO es una retirada', async () => {
+  // Medido durante el desarrollo: consultando solo desde Espana, 4 de 7 candidatos
+  // eran bloqueos regionales. Estos dos se ven en Asia pero no en Espana.
+  const r = await confirmarRetirada([2057470, 3042150, 4207050, 659350, 591700, 507320], limitador);
+
+  assert.equal(r.get(2057470).retirado, false, 'Earth:Revival se ve en JP');
+  assert.equal(r.get(3042150).retirado, false, 'カラオケJOYSOUND se ve en JP');
+  assert.equal(r.get(4207050).retirado, false, 'Snowbreak se ve en CN');
+
+  assert.equal(r.get(659350).retirado, true, 'Cowboy Rewenge no se ve en ningun mercado');
+  assert.equal(r.get(591700).retirado, true, 'Tiger Knight DLC no se ve en ningun mercado');
+  assert.equal(r.get(507320).retirado, true, 'The Bus Dedicated Server no se ve en ningun mercado');
+});
+
+test('el precio solo se puede capturar antes de la retirada', async () => {
+  const r = await consultarLote([620, 226320], limitador);
+  assert.ok(r.get(620).precio, 'un juego vivo de pago debe traer precio');
+  assert.equal(r.get(226320).precio, null, 'un retirado ya no devuelve precio: hay que haberlo guardado antes');
 });
 
 test('is_free no distingue promo de F2P (por eso hace falta la busqueda de la tienda)', async () => {

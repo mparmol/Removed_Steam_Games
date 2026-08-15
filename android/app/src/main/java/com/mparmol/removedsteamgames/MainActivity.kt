@@ -163,8 +163,9 @@ private fun Fila(ev: Evento, alPulsar: (Evento) -> Unit) {
     ListItem(
         headlineContent = { Text(ev.titulo, fontWeight = FontWeight.Medium) },
         supportingContent = {
+            val precio = ev.precio?.let { " · $it" } ?: ""
             val extra = ev.vence?.let { " · vence ${it.take(16).replace('T', ' ')}" } ?: ""
-            Text("${Tipos.etiqueta(ev.tipo)} · ${Tipos.etiquetaContenido(ev.app_type)}$extra")
+            Text("${Tipos.etiqueta(ev.tipo)} · ${Tipos.etiquetaContenido(ev.app_type)}$precio$extra")
         },
         overlineContent = { Text(ev.detectado.take(16).replace('T', ' ')) },
         modifier = Modifier.clickable { alPulsar(ev) },

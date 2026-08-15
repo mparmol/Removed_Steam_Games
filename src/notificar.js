@@ -57,8 +57,9 @@ function cuerpoDe(ev) {
   if (ev.tipo === 'gratis_activo') {
     return ev.vence ? `${nombre} — reclamalo antes del ${new Date(ev.vence).toLocaleString('es-ES')}` : `${nombre} — reclamalo ya`;
   }
-  if (ev.tipo === 'retirada_anunciada') return `${nombre} — ultima oportunidad para comprarlo`;
-  if (ev.tipo === 'retirado') return `${nombre} — ya no se puede comprar`;
+  const precio = ev.precio ? ` (costaba ${ev.precio})` : '';
+  if (ev.tipo === 'retirada_anunciada') return `${nombre}${precio} — ultima oportunidad para comprarlo`;
+  if (ev.tipo === 'retirado') return `${nombre}${precio} — ya no se puede comprar`;
   return nombre;
 }
 
