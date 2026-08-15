@@ -29,6 +29,7 @@ import com.mparmol.removedsteamgames.datos.Biblioteca
 import com.mparmol.removedsteamgames.datos.Evento
 import com.mparmol.removedsteamgames.datos.Feed
 import com.mparmol.removedsteamgames.datos.Tipos
+import com.mparmol.removedsteamgames.notif.Prueba
 import com.mparmol.removedsteamgames.notif.Topics
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -363,16 +364,20 @@ private fun Ajustes() {
                         "móvil no está suscrito. Esto lo comprueba y lo reintenta.",
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Button(
-                    onClick = {
-                        comprobando = true
-                        ambito.launch {
-                            diagnostico = Topics.diagnostico(ctx)
-                            comprobando = false
-                        }
-                    },
-                    enabled = !comprobando,
-                ) { Text(if (comprobando) "Comprobando…" else "Comprobar y reintentar") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            comprobando = true
+                            ambito.launch {
+                                diagnostico = Topics.diagnostico(ctx)
+                                comprobando = false
+                            }
+                        },
+                        enabled = !comprobando,
+                    ) { Text(if (comprobando) "Comprobando…" else "Comprobar suscripción") }
+
+                    OutlinedButton(onClick = { diagnostico = Prueba.enviar(ctx) }) { Text("Notificación de prueba") }
+                }
 
                 diagnostico?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
