@@ -14,8 +14,9 @@ on:
 permissions:
   contents: write
 
+# Mismo grupo que vigilancia y bootstrap: comparten el asset de estado.
 concurrency:
-  group: barrido
+  group: estado
   cancel-in-progress: false
 
 jobs:

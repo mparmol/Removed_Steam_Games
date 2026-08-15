@@ -19,6 +19,12 @@ on:
 permissions:
   contents: write
 
+# Mismo grupo que vigilancia y barrido: los tres escriben el asset de estado y no
+# pueden solaparse, o el ultimo en subir borra el trabajo del anterior.
+concurrency:
+  group: estado
+  cancel-in-progress: false
+
 jobs:
   shards:
     runs-on: ubuntu-latest

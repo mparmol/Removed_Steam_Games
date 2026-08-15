@@ -11,8 +11,11 @@ on:
 permissions:
   contents: write
 
+# Grupo COMPARTIDO con barrido y bootstrap: los tres escriben el mismo asset de
+# estado, y si se solapan el ultimo en subir pisa el trabajo del otro sin dar error.
+# Saltarse un ciclo de 15 min es inofensivo; perder un bootstrap no.
 concurrency:
-  group: vigilancia
+  group: estado
   cancel-in-progress: false
 
 jobs:
