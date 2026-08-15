@@ -129,3 +129,18 @@ test('limitador: bloquea al agotar el cupo y deja pasar al vencer la ventana', a
   await cuarta;
   assert.equal(pasó, true, 'al vencer la ventana deberia continuar sola');
 });
+
+test('remgc: los ids NO son crecientes, hay que llevar registro de lo visto', () => {
+  // Caso real de la pagina 779: dos rangos de id distintos conviviendo, y el mayor
+  // aparece ANTES. Filtrar por "id > ultimo" se salta comentarios nuevos.
+  const enPagina = ['581679396200450653', '418424007826614558', '418424007826728115'];
+  const maximo = enPagina.reduce((a, b) => (BigInt(a) > BigInt(b) ? a : b));
+  assert.equal(maximo, '581679396200450653', 'el mayor es el primero de la pagina');
+
+  const conMaximo = enPagina.filter((id) => BigInt(id) > BigInt(maximo));
+  assert.equal(conMaximo.length, 0, 'un filtro por maximo se traga los dos siguientes');
+
+  const vistos = new Set(['581679396200450653']);
+  const conRegistro = enPagina.filter((id) => !vistos.has(id));
+  assert.equal(conRegistro.length, 2, 'el registro explicito si los detecta');
+});

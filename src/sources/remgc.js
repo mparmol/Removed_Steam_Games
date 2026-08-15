@@ -56,11 +56,31 @@ export function anuncioDeTexto(texto) {
   return m ? m[0] : null;
 }
 
+/** Cuantas paginas hacia atras leer como maximo en una pasada. */
+const PAGINAS_MAX = 8;
+
 /**
- * Lee la ultima pagina del hilo y devuelve los comentarios posteriores a `ultimoId`.
- * Coste: 2 peticiones HTTP.
+ * Devuelve los comentarios del hilo posteriores a `ultimoId`.
+ *
+ * Leer SOLO la ultima pagina no basta, por dos motivos:
+ *  - En el primer arranque esa pagina puede tener un unico comentario, y todo el
+ *    resto del dia queda sin ver.
+ *  - Cuando una pagina se llena Steam abre otra; si entre dos ciclos llegan
+ *    comentarios repartidos entre las dos, los de la anterior se pierden.
+ *
+ * Por eso se calcula cuantos comentarios han entrado desde la ultima vez
+ * (comparando total_count) y se retrocede lo necesario, con un margen de una pagina.
+ *
+ * OJO con los ids: NO son crecientes. En una misma pagina conviven rangos distintos
+ * (581679396200450653 aparece antes que 418424007826614558 pese a ser mayor), asi que
+ * no sirven para decidir que es nuevo comparando con un maximo. Hay que llevar el
+ * registro explicito de lo ya procesado.
+ *
+ * @param {Set<string>|string[]} vistos  ids ya procesados
+ * @param {number|null} ultimoTotal      total_count de la ejecucion anterior
  */
-export async function comentariosNuevos(ultimoId = null, limitador = null) {
+export async function comentariosNuevos(vistos = [], ultimoTotal = null, limitador = null) {
+  const yaVistos = vistos instanceof Set ? vistos : new Set(vistos);
   const portada = await pedir(HILO, { limitador, comoTexto: true });
 
   const total = Number(portada.match(/"total_count":(\d+)/)?.[1]);
@@ -68,23 +88,33 @@ export async function comentariosNuevos(ultimoId = null, limitador = null) {
   if (!total || !porPagina) throw new Error('RemGC: no se encuentran total_count/pagesize en el HTML');
 
   const ultimaPagina = Math.ceil(total / porPagina);
-  const html = await pedir(`${HILO}?ctp=${ultimaPagina}`, { limitador, comoTexto: true });
 
-  const crudos = recortarJson(html, 'comments_raw') ?? {};
-  const comentarios = Object.entries(crudos)
-    .map(([id, c]) => ({
-      id,
-      texto: String(c.text ?? ''),
-      autor: c.author ?? null,
-      appids: appidsDeTexto(String(c.text ?? '')),
-      anuncio: anuncioDeTexto(String(c.text ?? '')),
-    }))
-    // los ids son crecientes: sirven para ordenar y para saber que es nuevo
-    .sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+  // sin referencia previa cogemos un colchon de 3 paginas (~45 comentarios)
+  const entrantes = ultimoTotal != null ? Math.max(0, total - ultimoTotal) : porPagina * 3;
+  const cuantasPaginas = Math.min(PAGINAS_MAX, Math.max(1, Math.ceil(entrantes / porPagina) + 1));
 
-  const nuevos = ultimoId
-    ? comentarios.filter((c) => BigInt(c.id) > BigInt(ultimoId))
-    : comentarios;
+  const comentarios = [];
+  for (let i = 0; i < cuantasPaginas; i++) {
+    const pagina = ultimaPagina - i;
+    if (pagina < 1) break;
+    const html = await pedir(`${HILO}?ctp=${pagina}`, { limitador, comoTexto: true });
+    const crudos = recortarJson(html, 'comments_raw') ?? {};
+    for (const [id, c] of Object.entries(crudos)) {
+      const texto = String(c.text ?? '');
+      comentarios.push({ id, texto, autor: c.author ?? null, appids: appidsDeTexto(texto), anuncio: anuncioDeTexto(texto) });
+    }
+  }
 
-  return { total, ultimaPagina, comentarios, nuevos, ultimoIdVisto: comentarios.at(-1)?.id ?? ultimoId };
+  const nuevos = comentarios.filter((c) => !yaVistos.has(c.id));
+
+  return {
+    total,
+    ultimaPagina,
+    paginasLeidas: cuantasPaginas,
+    comentarios,
+    nuevos,
+    // se conservan mas ids de los que caben en las paginas leidas, por si el hilo
+    // se mueve mucho entre ciclos
+    vistos: [...comentarios.map((c) => c.id), ...yaVistos].slice(0, 600),
+  };
 }

@@ -18,8 +18,8 @@ export function estadoVacio() {
     promos: {},
     // appids que la busqueda de la tienda daba como gratis en el ciclo anterior
     gratis_ahora: [],
-    // ultimo comentario procesado del hilo RemGC
-    remgc: { ultimo_id: null },
+    // comentarios ya procesados del hilo RemGC (los ids NO son crecientes)
+    remgc: { vistos: [], total: null },
     // articulos ya procesados de delistedgames.com
     delisted: { vistos: [] },
     // recorrido rotatorio del catalogo buscando avisos de los desarrolladores

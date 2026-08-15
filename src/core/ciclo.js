@@ -200,9 +200,13 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
 
   // ---- 5. Hilo RemGC: retiradas anunciadas por humanos ---------------------------
   try {
-    const { nuevos, ultimoIdVisto, total } = await comentariosNuevos(estado.remgc.ultimo_id, limitador);
+    const { nuevos, vistos, total, paginasLeidas } = await comentariosNuevos(
+      estado.remgc.vistos ?? [],
+      estado.remgc.total ?? null,
+      limitador,
+    );
     resumen.remgc = nuevos.length;
-    registrar(`  RemGC: ${total} comentarios, ${nuevos.length} nuevos`);
+    registrar(`  RemGC: ${total} comentarios (${paginasLeidas} pag. leidas), ${nuevos.length} nuevos`);
 
     const appidsRemgc = [...new Set(nuevos.flatMap((c) => c.appids))];
     const info = appidsRemgc.length ? await consultarMuchos(appidsRemgc, limitador) : new Map();
@@ -221,7 +225,7 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         }));
       }
     }
-    estado.remgc.ultimo_id = ultimoIdVisto;
+    estado.remgc = { vistos, total };
   } catch (e) {
     registrar(`  RemGC fallo: ${e.message}`);
   }
