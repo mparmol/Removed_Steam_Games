@@ -88,18 +88,41 @@ async function watch() {
 
 // --- comandos por shard ----------------------------------------------------------
 
-async function bootstrap() {
-  const salida = valor('salida', `.data/shard-${shard}.json`);
+/**
+ * Enumera el catalogo y lo deja en un fichero.
+ *
+ * Se separo del bootstrap porque enumerar cuesta ~500 peticiones (~25 min con el
+ * limite de Steam) y cada shard lo estaba repitiendo por su cuenta para usar solo
+ * 1/20 del resultado: 20 veces el mismo trabajo. Ahora se hace una vez y se reparte.
+ */
+async function enumerar() {
+  const salida = valor('salida', '.data/catalogo.json');
   const limitador = new Limitador(100);
-
-  // Ya no hace falta fuerza bruta sobre 5,2M de appids: IStoreQueryService enumera
-  // el catalogo real (~304k) sin API key, 1.000 por peticion.
-  console.log('enumerando el catalogo...');
   let ultimoAviso = 0;
   const catalogo = await enumerarCatalogo(limitador, (unicos, consulta, hechos, total) => {
-    if (unicos - ultimoAviso >= 25000) { ultimoAviso = unicos; console.log(`  ${consulta}: ${hechos}/${total}  (unicos acumulados: ${unicos})`); }
+    if (unicos - ultimoAviso >= 25000) { ultimoAviso = unicos; console.log(`  ${consulta}: ${hechos}/${total}  (unicos: ${unicos})`); }
   });
-  console.log(`catalogo: ${catalogo.length} apps\n`);
+  console.log(`catalogo: ${catalogo.length} apps`);
+  await escribirParcial(salida, { catalogo });
+}
+
+async function bootstrap() {
+  const salida = valor('salida', `.data/shard-${shard}.json`);
+  const rutaCatalogo = valor('catalogo', null);
+  const limitador = new Limitador(100);
+
+  let catalogo;
+  if (rutaCatalogo) {
+    catalogo = JSON.parse(await readFile(rutaCatalogo, 'utf8')).catalogo;
+    console.log(`catalogo recibido: ${catalogo.length} apps`);
+  } else {
+    console.log('enumerando el catalogo (sin --catalogo, se hace aqui)...');
+    let ultimoAviso = 0;
+    catalogo = await enumerarCatalogo(limitador, (unicos, consulta, hechos, total) => {
+      if (unicos - ultimoAviso >= 25000) { ultimoAviso = unicos; console.log(`  ${consulta}: ${hechos}/${total}  (unicos: ${unicos})`); }
+    });
+    console.log(`catalogo: ${catalogo.length} apps\n`);
+  }
 
   // Reparto por appid, NO por indice: cada shard enumera por su cuenta y el orden de
   // la lista puede no coincidir entre jobs, con lo que un reparto posicional dejaria
@@ -111,7 +134,7 @@ async function bootstrap() {
   await consultarMuchos(objetivos, limitador, (h, t) => {
     if (h % 10000 === 0 || h === t) console.log(`  ${h}/${t} (${((h / t) * 100).toFixed(1)}%)`);
   }).then((vistos) => {
-    for (const [appid, d] of vistos) if (d.visible) encontradas[appid] = [1, d.nombre, d.tipo, d.precio];
+    for (const [appid, d] of vistos) if (d.visible) encontradas[appid] = [1, d.nombre, d.tipo, d.precio, d.comprable ? 1 : 0];
   });
 
   console.log(`\n${Object.keys(encontradas).length} apps visibles encontradas`);
@@ -130,7 +153,7 @@ async function sweep() {
   await consultarMuchos(mias, limitador, (h, t) => {
     if (h % 5000 === 0 || h === t) console.log(`  ${h}/${t}`);
   }).then((vistos) => {
-    for (const [appid, d] of vistos) observado[appid] = [d.visible ? 1 : 0, d.nombre, d.tipo, d.precio];
+    for (const [appid, d] of vistos) observado[appid] = [d.visible ? 1 : 0, d.nombre, d.tipo, d.precio, d.comprable ? 1 : 0];
   });
 
   console.log(`\n${Object.keys(observado).length} apps observadas`);
@@ -160,7 +183,7 @@ async function fusionar() {
     const parcial = JSON.parse(await readFile(join(dir, f), 'utf8'));
     for (const [appidStr, fila] of Object.entries(parcial.apps)) {
       const appid = Number(appidStr);
-      const ahora = { visible: fila[0] === 1, nombre: fila[1], tipo: fila[2], precio: fila[3] ?? null };
+      const ahora = { visible: fila[0] === 1, nombre: fila[1], tipo: fila[2], precio: fila[3] ?? null, comprable: fila[4] == null ? fila[0] === 1 : fila[4] === 1 };
       vistas++;
 
       const antes = leerApp(estado, appid);
@@ -261,10 +284,10 @@ async function mostrarEstado() {
   }, null, 2));
 }
 
-const comandos = { watch, sweep, bootstrap, fusionar, estado: mostrarEstado };
+const comandos = { watch, sweep, bootstrap, enumerar, fusionar, estado: mostrarEstado };
 
 if (!comandos[comando]) {
-  console.error('uso: node src/cli.js <watch|sweep|bootstrap|fusionar|estado> [--dry-run] [--remoto] [--shard N --of M] [--salida f] [--entradas dir]');
+  console.error('uso: node src/cli.js <watch|sweep|bootstrap|enumerar|fusionar|estado> [--dry-run] [--remoto] [--shard N --of M] [--salida f] [--entradas dir]');
   process.exit(1);
 }
 

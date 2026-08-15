@@ -26,9 +26,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  shards:
+  # Enumerar cuesta ~500 peticiones (~25 min con el limite de Steam). Si lo hiciera
+  # cada shard, serian 20 veces el mismo trabajo para usar 1/20 del resultado cada uno:
+  # medido, 28 min por shard de los cuales solo 3 eran utiles.
+  enumerar:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --omit=dev
+
+      - name: Enumerar el catalogo una sola vez
+        run: node src/cli.js enumerar --salida catalogo.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalogo
+          path: catalogo.json
+          retention-days: 1
+
+  shards:
+    needs: enumerar
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -41,11 +65,15 @@ jobs:
           cache: npm
       - run: npm ci --omit=dev
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: catalogo
+
       - name: IP de este runner
         run: curl -s https://api.ipify.org; echo
 
       - name: Sondear shard ${{ matrix.shard }}
-        run: node src/cli.js bootstrap --shard ${{ matrix.shard }} --of 20 --hasta ${{ inputs.hasta }} --salida shard-${{ matrix.shard }}.json
+        run: node src/cli.js bootstrap --shard ${{ matrix.shard }} --of 20 --catalogo catalogo.json --salida shard-${{ matrix.shard }}.json
 
       - uses: actions/upload-artifact@v4
         with:
