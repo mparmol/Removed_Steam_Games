@@ -50,6 +50,7 @@ const TITULOS = {
   gratis_proximo: 'Pronto gratis',
   finde_gratis: 'Fin de semana gratis',
   revivido: 'Ha vuelto a Steam',
+  no_comprable: 'Ya no se puede comprar',
 };
 
 function cuerpoDe(ev) {

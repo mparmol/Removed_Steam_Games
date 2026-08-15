@@ -74,6 +74,7 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
     const appid = Number(item.appid ?? item.id);
     if (!appid) continue;
     const compra = item.best_purchase_option ?? item.purchase_options?.[0] ?? null;
+    const gratis = item.is_free === true;
     salida.set(appid, {
       appid,
       // `visible: false` cubre tanto "retirado" como "nunca existio". No los distingue,
@@ -81,8 +82,12 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
       visible: item.visible === true,
       nombre: item.name ?? '',
       tipo: normalizarTipo(item.type),
-      gratis: item.is_free === true,
+      gratis,
       precio: compra?.formatted_final_price ?? compra?.formatted_original_price ?? null,
+      // Si le retiran el ultimo paquete, la pagina sigue viva pero no hay forma de
+      // comprarlo. Practicamente es una retirada, y mirar solo `visible` no lo ve.
+      // Caso real: Anvillage (2026300) visible=true con 0 opciones de compra.
+      comprable: gratis || (item.purchase_options?.length ?? 0) > 0 || item.best_purchase_option != null,
     });
   }
   return salida;
@@ -97,17 +102,28 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
  */
 export async function confirmarRetirada(appids, limitador) {
   const visibleEn = new Map(appids.map((a) => [Number(a), []]));
+  const comprableEn = new Map(appids.map((a) => [Number(a), []]));
 
   for (const pais of PAISES_CONFIRMACION) {
     for (let i = 0; i < appids.length; i += LOTE_MAX) {
       const res = await consultarLote(appids.slice(i, i + LOTE_MAX), limitador, pais);
-      for (const [appid, dato] of res) if (dato.visible) visibleEn.get(appid)?.push(pais);
+      for (const [appid, dato] of res) {
+        if (dato.visible) visibleEn.get(appid)?.push(pais);
+        if (dato.comprable) comprableEn.get(appid)?.push(pais);
+      }
     }
   }
 
   const salida = new Map();
   for (const [appid, paises] of visibleEn) {
-    salida.set(appid, { retirado: paises.length === 0, visibleEn: paises });
+    const compra = comprableEn.get(appid) ?? [];
+    salida.set(appid, {
+      retirado: paises.length === 0,
+      visibleEn: paises,
+      // visible en algun sitio pero sin forma de comprarlo en ninguno
+      soloEscaparate: paises.length > 0 && compra.length === 0,
+      comprableEn: compra,
+    });
   }
   return salida;
 }

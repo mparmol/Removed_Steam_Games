@@ -43,6 +43,9 @@ object Tipos {
     /** No comprable aquí pero vivo en otros mercados. Solo feed, nunca notificación. */
     const val REGIONAL = "bloqueo_regional"
 
+    /** La ficha sigue publicada pero no hay forma de comprarlo en ningún mercado. */
+    const val NO_COMPRABLE = "no_comprable"
+
     fun etiqueta(tipo: String) = when (tipo) {
         RETIRADO -> "Retirado"
         ANUNCIADA -> "Lo van a retirar"
@@ -51,6 +54,7 @@ object Tipos {
         FINDE -> "Finde gratis"
         REVIVIDO -> "Ha vuelto"
         REGIONAL -> "Bloqueado en España"
+        NO_COMPRABLE -> "Ya no se vende"
         else -> tipo
     }
 

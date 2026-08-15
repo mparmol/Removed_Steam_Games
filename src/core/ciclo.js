@@ -50,8 +50,15 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
     // La bandera `visible` es RELATIVA AL PAIS: un juego bloqueado en Espana parece
     // retirado. Medido: 4 de 7 candidatos eran bloqueos regionales, no retiradas.
     // Por eso los que "desaparecen" se contrastan contra varios mercados antes de nada.
+    // Sospechoso = ha dejado de verse, O ha dejado de poder comprarse aun con la
+    // pagina viva. Lo segundo es el caso Anvillage: Steam mantiene la ficha con un
+    // aviso de "no longer available" y `visible` sigue en true.
     const sospechosos = [...vistos.values()]
-      .filter((v) => !v.visible && leerApp(estado, v.appid)?.visible)
+      .filter((v) => {
+        const antes = leerApp(estado, v.appid);
+        if (!antes) return false;
+        return (antes.visible && !v.visible) || (antes.comprable && !v.comprable);
+      })
       .map((v) => v.appid);
 
     const confirmacion = sospechosos.length > 0 ? await confirmarRetirada(sospechosos, limitador) : new Map();
@@ -68,18 +75,32 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       // saberlo. Va al feed con su propio tipo y nunca genera notificacion.
       const conf = confirmacion.get(appid);
       if (conf && !conf.retirado) {
-        registrar(`  ${appid} sigue visible en ${conf.visibleEn.join(',')}: bloqueo regional`);
+        // Pagina viva en algun mercado pero sin forma de comprarlo en ninguno:
+        // para el usuario equivale a una retirada.
+        const tipoEvento = conf.soloEscaparate ? 'no_comprable' : 'bloqueo_regional';
+        const detalle = conf.soloEscaparate
+          ? 'La ficha sigue publicada pero no hay ninguna forma de comprarlo'
+          : `Sigue a la venta en ${conf.comprableEn.join(', ') || conf.visibleEn.join(', ')}`;
+        registrar(`  ${appid}: ${tipoEvento} (visible en ${conf.visibleEn.join(',')}, comprable en ${conf.comprableEn.join(',') || 'ninguno'})`);
+
         eventos.push(crearEvento({
-          tipo: 'bloqueo_regional',
+          tipo: tipoEvento,
           appid,
           nombre: ahora.nombre || antes?.nombre || '',
           app_type: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
           precio: antes?.precio,
           fuente: 'pics',
           confianza: 'confirmado',
-          detalle: `Sigue a la venta en ${conf.visibleEn.join(', ')}`,
+          detalle,
         }));
-        escribirApp(estado, appid, { visible: false, nombre: ahora.nombre || antes?.nombre || '', tipo: ahora.tipo, precio: ahora.precio });
+        if (conf.soloEscaparate) estado.retirados[appid] = new Date().toISOString();
+        escribirApp(estado, appid, {
+          visible: ahora.visible,
+          nombre: ahora.nombre || antes?.nombre || '',
+          tipo: ahora.tipo,
+          precio: ahora.precio,
+          comprable: ahora.comprable,
+        });
         continue;
       }
 
@@ -126,6 +147,7 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         nombre: ahora.nombre || antes?.nombre || '',
         tipo: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
         precio: ahora.precio,
+        comprable: ahora.comprable,
       });
     }
   }

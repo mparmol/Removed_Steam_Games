@@ -11,6 +11,9 @@ export const TIPOS = /** @type {const} */ ([
   'revivido',
   // no comprable desde Espana pero vivo en otros mercados: va al feed, nunca a push
   'bloqueo_regional',
+  // pagina de tienda viva pero sin ninguna forma de comprarlo (le retiraron el
+  // ultimo paquete). En la practica es una retirada, aunque `visible` siga en true.
+  'no_comprable',
 ]);
 
 /** Tipos que jamas generan notificacion, solo entrada en el feed. */
@@ -91,6 +94,8 @@ export function esUrgente(ev) {
   // el preaviso es lo que permite comprarlo a tiempo: siempre interrumpe
   if (ev.tipo === 'retirada_anunciada') return true;
   if (ev.tipo === 'retirado' && ev.app_type === 'game') return true;
+  // para el usuario "no se puede comprar" equivale a retirado
+  if (ev.tipo === 'no_comprable' && ev.app_type === 'game') return true;
   return false;
 }
 
