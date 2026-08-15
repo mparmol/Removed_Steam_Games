@@ -24,6 +24,9 @@ export function estadoVacio() {
     delisted: { vistos: [] },
     // recorrido rotatorio del catalogo buscando avisos de los desarrolladores
     anuncios: { cursor: 0, avisados: [] },
+    // retiradas con fecha conocida: appid -> {fecha, nombre, precio, avisado, ultima_llamada}
+    // permite avisar otra vez cuando el plazo esta a punto de cumplirse
+    previstas: {},
     // deteccion provisional pendiente de confirmar: appid -> {tipo, visto}
     pendientes: {},
   };

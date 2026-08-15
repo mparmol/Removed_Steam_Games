@@ -7,6 +7,7 @@ import { promosDePaquetes, promosQueTocanAvisar } from '../steam/promos.js';
 import { comentariosNuevos } from '../sources/remgc.js';
 import { articulosNuevos } from '../sources/delisted.js';
 import { anunciosDe, elegirObjetivos } from '../sources/anuncios.js';
+import { fichasRecientes } from '../sources/curator.js';
 import { leerApp, escribirApp } from './estado.js';
 import { crearEvento, deduplicar } from './eventos.js';
 
@@ -294,7 +295,74 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
     registrar(`  anuncios fallo: ${e.message}`);
   }
 
-  // ---- 8. Cerrar cursor ---------------------------------------------------------
+  // ---- 8. Curador "Games at risk of removal" ------------------------------------
+  // La mejor fuente de preaviso: trae appid, precio y FECHA EXACTA de retirada.
+  try {
+    const fichas = await fichasRecientes(50, limitador);
+    resumen.curador = fichas.length;
+    registrar(`  curador: ${fichas.length} avisos con fecha`);
+
+    for (const f of fichas) {
+      const clave = `${f.appid}|${f.fecha_retirada ?? 'pronto'}`;
+      const previa = estado.previstas[f.appid];
+
+      // guardamos siempre la fecha para poder dar la ultima llamada mas adelante
+      estado.previstas[f.appid] = {
+        fecha: f.fecha_retirada,
+        nombre: f.nombre,
+        precio: f.precio,
+        anuncio: f.anuncio,
+        nota: f.nota,
+        avisado: previa?.clave === clave ? previa.avisado : false,
+        ultima_llamada: previa?.clave === clave ? previa.ultima_llamada : false,
+        clave,
+      };
+      if (previa?.clave === clave && previa.avisado) continue;
+
+      estado.previstas[f.appid].avisado = true;
+      eventos.push(crearEvento({
+        tipo: 'retirada_anunciada',
+        appid: f.appid,
+        nombre: f.nombre,
+        app_type: leerApp(estado, f.appid)?.tipo ?? 'game',
+        precio: f.precio,
+        fuente: 'curador',
+        anuncio: f.anuncio,
+        detalle: f.nota,
+        vence: f.fecha_retirada,
+        confianza: 'confirmado',
+      }));
+    }
+  } catch (e) {
+    registrar(`  curador fallo: ${e.message}`);
+  }
+
+  // ---- 9. Ultima llamada: el plazo se acaba -------------------------------------
+  // Sin esto, un aviso de "lo retiran el 21 de septiembre" llega en julio y se olvida.
+  const AVISO_MS = 72 * 60 * 60 * 1000;
+  for (const [appid, p] of Object.entries(estado.previstas)) {
+    if (!p.fecha || p.ultima_llamada) continue;
+    const restante = Date.parse(p.fecha) - Date.now();
+    if (restante < 0 || restante > AVISO_MS) continue;
+
+    p.ultima_llamada = true;
+    const horas = Math.round(restante / 3600000);
+    eventos.push(crearEvento({
+      tipo: 'retirada_anunciada',
+      appid: Number(appid),
+      nombre: p.nombre,
+      app_type: leerApp(estado, appid)?.tipo ?? 'game',
+      precio: p.precio,
+      fuente: 'ultima_llamada',
+      anuncio: p.anuncio,
+      detalle: `ULTIMA LLAMADA: lo retiran en ${horas} h`,
+      vence: p.fecha,
+      confianza: 'confirmado',
+    }));
+    registrar(`  ULTIMA LLAMADA ${appid} ${p.nombre}: ${horas} h`);
+  }
+
+  // ---- 10. Cerrar cursor --------------------------------------------------------
   if (cambios.actual) estado.cursor.changenumber = cambios.actual;
   estado.cursor.ultimo_ciclo = new Date().toISOString();
   estado.cursor.ventana_perdida = cambios.ventanaPerdida;

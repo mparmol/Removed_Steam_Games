@@ -61,7 +61,10 @@ async function dejarEstado(estado) {
 async function watch() {
   console.log(`== ciclo de vigilancia ==${seco ? '  [DRY RUN]' : ''}`);
   const estado = await traerEstado();
-  console.log(`  estado: ${Object.keys(estado.apps).length} apps conocidas (${contarVisibles(estado)} visibles)`);
+  // Arranque en frio: todo lo que existe hoy parece "nuevo". Se publica en el feed
+  // pero no se notifica, o la primera ejecucion serian decenas de avisos de golpe.
+  const enFrio = estado.cursor.changenumber == null;
+  console.log(`  estado: ${Object.keys(estado.apps).length} apps conocidas (${contarVisibles(estado)} visibles)${enFrio ? '  [ARRANQUE EN FRIO: sin notificaciones]' : ''}`);
 
   const { eventos, resumen } = await ejecutarCiclo(estado);
 
@@ -74,8 +77,9 @@ async function watch() {
 
   const confirmados = eventos.filter((e) => e.confianza === 'confirmado');
   const pub = await publicar(confirmados);
+  if (enFrio) await marcarComoNotificados(confirmados);
   await dejarEstado(estado);
-  console.log(`\nfeed: ${pub.nuevos} nuevos, ${pub.ignorados} ya conocidos`);
+  console.log(`\nfeed: ${pub.nuevos} nuevos, ${pub.ignorados} ya conocidos${enFrio ? ' (marcados como ya notificados)' : ''}`);
 
   // lo consume el workflow para decidir si dispara el barrido de emergencia
   await escribirSalidaAccion({ ventana_perdida: resumen.pics?.ventanaPerdida === true, eventos: confirmados.length });
@@ -212,6 +216,17 @@ async function fusionar() {
 }
 
 // --- utilidades ------------------------------------------------------------------
+
+/**
+ * Marca eventos como ya notificados sin enviarlos. Se usa en el arranque en frio:
+ * el feed debe quedar poblado, pero el movil no debe recibir el historico entero.
+ */
+async function marcarComoNotificados(eventos) {
+  const ruta = join(process.env.DIR_FEED ?? 'data/feed', 'notificados.json');
+  let previos = [];
+  try { previos = JSON.parse(await readFile(ruta, 'utf8')); } catch { /* aun no existe */ }
+  await writeFile(ruta, JSON.stringify([...eventos.map((e) => e.id), ...previos].slice(0, 3000)));
+}
 
 /** Expone valores al workflow via $GITHUB_OUTPUT. */
 async function escribirSalidaAccion(pares) {

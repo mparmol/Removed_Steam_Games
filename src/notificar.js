@@ -99,8 +99,17 @@ async function principal() {
   const token = await conseguirToken(cuenta);
   const proyecto = cuenta.project_id;
 
-  const urgentes = pendientes.filter(esUrgente);
-  const resto = pendientes.filter((e) => !esUrgente(e));
+  // Tope de notificaciones individuales por ciclo. Sin esto, una tanda del curador
+  // (que puede traer 20 avisos de golpe) vacia la bateria y entrena al usuario a
+  // ignorar la app, que es justo lo contrario de lo que queremos.
+  const MAX_INDIVIDUALES = Number(process.env.MAX_INDIVIDUALES ?? 5);
+
+  const prioridad = (e) =>
+    (e.fuente === 'ultima_llamada' ? 0 : e.tipo === 'gratis_activo' ? 1 : e.vence ? 2 : 3);
+
+  const urgentesTodos = pendientes.filter(esUrgente).sort((a, b) => prioridad(a) - prioridad(b));
+  const urgentes = urgentesTodos.slice(0, MAX_INDIVIDUALES);
+  const resto = [...urgentesTodos.slice(MAX_INDIVIDUALES), ...pendientes.filter((e) => !esUrgente(e))];
 
   // Los urgentes interrumpen: uno a uno y con sus enlaces de accion.
   for (const ev of urgentes) {
@@ -127,11 +136,14 @@ async function principal() {
   // El resto va agrupado: con DLC, bandas sonoras y demos incluidos, notificar uno a
   // uno seria un bombardeo diario.
   if (resto.length > 0) {
-    const porTipo = resto.reduce((acc, e) => { acc[e.app_type] = (acc[e.app_type] ?? 0) + 1; return acc; }, {});
-    const desglose = Object.entries(porTipo).map(([t, n]) => `${n} ${t}`).join(', ');
+    const avisos = resto.filter((e) => e.tipo === 'retirada_anunciada').length;
+    const desglose = avisos > 0
+      ? `${avisos} con retirada anunciada` + (resto.length > avisos ? `, ${resto.length - avisos} ya retirados` : '')
+      : Object.entries(resto.reduce((a, e) => { a[e.app_type] = (a[e.app_type] ?? 0) + 1; return a; }, {}))
+          .map(([t, n]) => `${n} ${t}`).join(', ');
     await enviar(token, proyecto, {
       topic: 'resumen',
-      notification: { title: `${resto.length} retiradas mas`, body: desglose },
+      notification: { title: `${resto.length} avisos mas`, body: desglose },
       data: { tipo: 'resumen', total: String(resto.length), ids: resto.map((e) => e.id).join(',') },
       android: { priority: 'normal', notification: { channel_id: 'resumen', tag: 'resumen' } },
     });
