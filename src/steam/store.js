@@ -33,7 +33,15 @@ const CODIGOS = {
   7: 'video',
   10: 'hardware',
   11: 'music',
+  12: 'playtest',
 };
+
+/**
+ * Tipos que NUNCA se compran: no tener opciones de compra es su estado normal, no
+ * una retirada. Los playtests dieron 22 falsos positivos de "ya no se vende" en el
+ * primer ciclo, porque se abren y se cierran constantemente.
+ */
+const NO_VENDIBLES = new Set(['demo', 'playtest', 'hardware', 'otro']);
 
 export function normalizarTipo(t) {
   if (typeof t === 'string') return TIPOS[t.toLowerCase()] ?? 'otro';
@@ -78,6 +86,7 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
     // Un juego sin lanzar esta visible y SIN opciones de compra, igual que uno al que
     // le han quitado el ultimo paquete. Hay 52.752 asi en la tienda, o sea que sin
     // esta distincion el detector de "ya no se vende" seria un generador de ruido.
+    const tipo = normalizarTipo(item.type);
     const lanzamiento = Number(item.release?.steam_release_date ?? 0);
     const lanzado = lanzamiento > 0 && lanzamiento * 1000 < Date.now();
     salida.set(appid, {
@@ -86,15 +95,16 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
       // y da igual: lo que detectamos es la TRANSICION visible -> no visible.
       visible: item.visible === true,
       nombre: item.name ?? '',
-      tipo: normalizarTipo(item.type),
+      tipo,
       gratis,
       precio: compra?.formatted_final_price ?? compra?.formatted_original_price ?? null,
       lanzado,
       // Si le retiran el ultimo paquete, la pagina sigue viva pero no hay forma de
       // comprarlo. Practicamente es una retirada, y mirar solo `visible` no lo ve.
       // Caso real: Anvillage (2026300) visible=true con 0 opciones de compra.
-      // Solo cuenta en juegos ya lanzados, por lo dicho arriba.
-      comprable: !lanzado || gratis || (item.purchase_options?.length ?? 0) > 0 || item.best_purchase_option != null,
+      // No aplica a lo que aun no ha salido ni a lo que nunca se vende.
+      comprable: !lanzado || NO_VENDIBLES.has(tipo) || gratis ||
+        (item.purchase_options?.length ?? 0) > 0 || item.best_purchase_option != null,
     });
   }
   return salida;
