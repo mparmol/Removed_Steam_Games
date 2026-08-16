@@ -57,7 +57,17 @@ jobs:
         if: env.FCM_SERVICE_ACCOUNT != ''
         env:
           DIR_FEED: feedrepo/feed
-        run: node src/notificar.js
+        run: |
+          set -o pipefail
+          node src/notificar.js 2>&1 | tee notificar.log
+
+      # Los logs de Actions dan 403 incluso en repos publicos, asi que el fallo
+      # se publica en la rama data para poder diagnosticarlo sin capturas.
+      - name: Publicar log si falla
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/publicar-log.sh notificar.log ${{ github.workflow }}
 
       - name: Publicar feed
         env:

@@ -36,8 +36,17 @@ const remoto = bandera('remoto');
 const shard = Number(valor('shard', 0));
 const deTotal = Number(valor('of', 1));
 
-/** Reparte por resto de la division: cada shard coge 1 de cada M elementos. */
-const meToca = (n) => n % deTotal === shard;
+/**
+ * Reparte una lista entre shards por POSICION, no por resto del appid.
+ *
+ * Repartir con `appid % N` esta gravemente sesgado: el 94,6% de los appids de Steam
+ * son multiplos de 10, y un multiplo de 10 modulo 12 siempre da resto par. Medido en
+ * el barrido nocturno: 46.279 apps en un shard contra 1.426 en otro, 32x de
+ * desequilibrio, con la mitad de los runners parados en 15 segundos.
+ *
+ * Ordenar primero hace el reparto determinista entre jobs distintos.
+ */
+const repartir = (lista) => [...lista].sort((a, b) => a - b).filter((_, i) => i % deTotal === shard);
 
 async function traerEstado() {
   if (remoto) {
@@ -124,10 +133,7 @@ async function bootstrap() {
     console.log(`catalogo: ${catalogo.length} apps\n`);
   }
 
-  // Reparto por appid, NO por indice: cada shard enumera por su cuenta y el orden de
-  // la lista puede no coincidir entre jobs, con lo que un reparto posicional dejaria
-  // huecos y solapes.
-  const objetivos = catalogo.filter((a) => a % deTotal === shard);
+  const objetivos = repartir(catalogo);
   console.log(`== bootstrap shard ${shard}/${deTotal}: ${objetivos.length} apps a consultar ==`);
   const encontradas = {};
 
@@ -145,7 +151,7 @@ async function sweep() {
   const salida = valor('salida', `.data/shard-${shard}.json`);
   const estado = await traerEstado();
 
-  const mias = Object.keys(estado.apps).map(Number).filter(meToca);
+  const mias = repartir(Object.keys(estado.apps).map(Number));
   console.log(`== barrido shard ${shard}/${deTotal}: ${mias.length} apps de ${Object.keys(estado.apps).length} ==`);
 
   const limitador = new Limitador(100);

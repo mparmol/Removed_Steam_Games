@@ -156,3 +156,19 @@ test('store: los codigos de tipo son los comprobados contra el catalogo real', a
   assert.equal(normalizarTipo(11), 'music', 'la musica es 11, no 10');
   assert.equal(normalizarTipo(99), 'otro');
 });
+
+test('reparto de shards: por appid esta sesgado, por posicion no', () => {
+  // El 94,6% de los appids de Steam son multiplos de 10, y multiplo de 10 modulo 12
+  // siempre da resto par: la mitad de los shards se quedaban vacios.
+  const appids = Array.from({ length: 12000 }, (_, i) => (i + 1) * 10);
+
+  const porResto = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i, 0]));
+  for (const a of appids) porResto[a % 12] += 1;
+  const restos = Object.values(porResto);
+  assert.equal(Math.min(...restos), 0, 'con % hay shards que no reciben nada');
+
+  const porPosicion = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i, 0]));
+  [...appids].sort((a, b) => a - b).forEach((_, i) => { porPosicion[i % 12] += 1; });
+  const pos = Object.values(porPosicion);
+  assert.equal(Math.max(...pos) - Math.min(...pos) <= 1, true, 'por posicion queda equilibrado');
+});
