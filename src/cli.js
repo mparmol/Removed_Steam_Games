@@ -196,7 +196,7 @@ async function fusionar() {
       // Tambien la transicion de comprable: el barrido es la unica pasada que mira
       // TODO el catalogo, asi que sin esto un juego al que le quitan el ultimo
       // paquete no se detecta nunca si PICS no vuelve a mencionarlo (caso Anvillage).
-      if (antes && (antes.visible !== ahora.visible || antes.comprable !== ahora.comprable)) {
+      if (antes && (antes.visible !== ahora.visible || (antes.comprableConocido && antes.comprable !== ahora.comprable))) {
         transiciones.push({ appid, antes, ahora, modo: parcial.modo });
       }
       escribirApp(estado, appid, {

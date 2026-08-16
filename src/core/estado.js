@@ -70,6 +70,10 @@ export const leerApp = (estado, appid) => {
     precio: fila[3] ?? null,
     // las filas viejas no traen el campo: se asume comprable si estaba visible
     comprable: fila[4] == null ? fila[0] === 1 : fila[4] === 1,
+    // Si nunca se midio, no hay transicion que detectar: la primera vez solo se
+    // anota. Sin esto, el primer barrido tras anadir el campo saco 500 avisos de
+    // golpe de apps que ya llevaban tiempo sin poder comprarse.
+    comprableConocido: fila[4] != null,
   };
 };
 

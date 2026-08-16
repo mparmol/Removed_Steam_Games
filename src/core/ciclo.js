@@ -57,7 +57,7 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       .filter((v) => {
         const antes = leerApp(estado, v.appid);
         if (!antes) return false;
-        return (antes.visible && !v.visible) || (antes.comprable && !v.comprable);
+        return (antes.visible && !v.visible) || (antes.comprableConocido && antes.comprable && !v.comprable);
       })
       .map((v) => v.appid);
 

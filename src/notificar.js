@@ -172,7 +172,9 @@ async function principal() {
     await enviar(token, proyecto, {
       topic: 'resumen',
       notification: { title: `${resto.length} avisos mas`, body: desglose },
-      data: { tipo: 'resumen', total: String(resto.length), ids: resto.map((e) => e.id).join(',') },
+      // FCM corta en 4 KB: con 490 eventos la lista completa de ids son ~8 KB y la
+      // peticion entera falla. Van solo unos pocos; el resto se ve en el feed.
+      data: { tipo: 'resumen', total: String(resto.length), ids: resto.slice(0, 20).map((e) => e.id).join(',') },
       android: { priority: 'normal', notification: { channel_id: 'resumen_v2', tag: 'resumen' } },
     });
     console.log(`  -> resumen: ${resto.length} eventos (${desglose})`);
