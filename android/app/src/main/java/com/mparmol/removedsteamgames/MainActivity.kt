@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -317,13 +318,44 @@ private fun Ajustes() {
     var estadoSync by remember { mutableStateOf<String?>(null) }
     var sincronizando by remember { mutableStateOf(false) }
 
+    // al volver del login se sincroniza solo: es lo que espera cualquiera
+    val lanzarLogin = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        sincronizando = true
+        ambito.launch {
+            estadoSync = Biblioteca.sincronizarConSesion(ctx)
+            sincronizando = false
+        }
+    }
+
     LazyColumn(Modifier.fillMaxSize()) {
         item {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Tu cuenta de Steam", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Sirve para marcar lo que ya tienes y poder ocultarlo. La clave y el ID se " +
-                        "guardan solo en este móvil: no se envían a ningún servidor ni al repositorio.",
+                    "Con sesión iniciada la lista es exacta e incluye los free-to-play, que la " +
+                        "API pública no devuelve. La sesión se queda en este móvil: no se envía " +
+                        "a ningún servidor ni al repositorio.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { lanzarLogin.launch(Intent(ctx, LoginActivity::class.java)) }) {
+                        Text("Iniciar sesión en Steam")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            sincronizando = true
+                            ambito.launch {
+                                estadoSync = Biblioteca.sincronizarConSesion(ctx)
+                                sincronizando = false
+                            }
+                        },
+                        enabled = !sincronizando,
+                    ) { Text(if (sincronizando) "…" else "Sincronizar") }
+                }
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Text(
+                    "Alternativa sin iniciar sesión (no incluye los free-to-play sin jugar):",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(

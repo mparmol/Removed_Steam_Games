@@ -31,6 +31,7 @@ object Biblioteca {
     // Correcciones a mano, por encima de lo que diga la API.
     // Steam no siempre reporta bien los free-to-play, asi que hace falta una salida
     // manual en vez de depender de que la API acierte siempre.
+    private val IGNORADOS = stringSetPreferencesKey("appids_ignorados")
     private val MARCADOS = stringSetPreferencesKey("appids_marcados")
     private val DESMARCADOS = stringSetPreferencesKey("appids_desmarcados")
 
@@ -80,6 +81,65 @@ object Biblioteca {
             return JSONObject(con.inputStream.bufferedReader().readText())
         } finally {
             con.disconnect()
+        }
+    }
+
+    /**
+     * Sincroniza con la SESION de Steam, no con la API.
+     *
+     * /dynamicstore/userdata/ es lo que consulta la tienda para saber que ya tienes.
+     * A diferencia de GetOwnedGames, incluye los free-to-play reclamados y sin jugar,
+     * que era justo lo que fallaba. Devuelve ademas la lista de deseados y la de
+     * ignorados.
+     */
+    suspend fun sincronizarConSesion(ctx: Context): String = withContext(Dispatchers.IO) {
+        val cookies = android.webkit.CookieManager.getInstance()
+            .getCookie("https://store.steampowered.com").orEmpty()
+        if (!cookies.contains("steamLoginSecure")) {
+            return@withContext "No hay sesión de Steam. Pulsa «Iniciar sesión en Steam»."
+        }
+        try {
+            val con = (URL("https://store.steampowered.com/dynamicstore/userdata/")
+                .openConnection() as HttpURLConnection).apply {
+                connectTimeout = 15000
+                readTimeout = 30000
+                setRequestProperty("Cookie", cookies)
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty(
+                    "User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36",
+                )
+            }
+            // HttpURLConnection no es Closeable: hay que cerrarlo a mano
+            val json = try {
+                if (con.responseCode != 200) error("HTTP ${con.responseCode}")
+                JSONObject(con.inputStream.bufferedReader().readText())
+            } finally {
+                con.disconnect()
+            }
+
+            val lista = { clave: String ->
+                val a = json.optJSONArray(clave)
+                buildSet<String> { if (a != null) for (i in 0 until a.length()) add(a.getInt(i).toString()) }
+            }
+            val poseidos = lista("rgOwnedApps")
+            val deseados = lista("rgWishlist")
+            val ignorados = lista("rgIgnoredApps")
+
+            if (poseidos.isEmpty()) {
+                return@withContext "La sesión responde pero no devuelve juegos. Vuelve a iniciar sesión."
+            }
+
+            ctx.ajustes.edit {
+                it[POSEIDOS] = poseidos
+                it[DESEADOS] = deseados
+                it[IGNORADOS] = ignorados
+                it[SINCRONIZADO] = java.time.Instant.now().toString()
+            }
+            "Sincronizado con tu sesión: ${poseidos.size} juegos, ${deseados.size} deseados" +
+                if (ignorados.isNotEmpty()) ", ${ignorados.size} ignorados" else ""
+        } catch (e: Exception) {
+            "Error: ${e.message}"
         }
     }
 

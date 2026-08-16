@@ -187,7 +187,10 @@ async function fusionar() {
       vistas++;
 
       const antes = leerApp(estado, appid);
-      if (antes && antes.visible !== ahora.visible) {
+      // Tambien la transicion de comprable: el barrido es la unica pasada que mira
+      // TODO el catalogo, asi que sin esto un juego al que le quitan el ultimo
+      // paquete no se detecta nunca si PICS no vuelve a mencionarlo (caso Anvillage).
+      if (antes && (antes.visible !== ahora.visible || antes.comprable !== ahora.comprable)) {
         transiciones.push({ appid, antes, ahora, modo: parcial.modo });
       }
       escribirApp(estado, appid, {
@@ -201,15 +204,32 @@ async function fusionar() {
 
   // Los shards consultan solo desde un pais, y `visible` es relativo al pais: sin
   // este contraste, los bloqueos regionales se cuelan como retiradas (medido: 4 de 7).
-  const desaparecidos = transiciones.filter((t) => !t.ahora.visible).map((t) => t.appid);
-  const confirmacion = desaparecidos.length > 0
-    ? await confirmarRetirada(desaparecidos, new Limitador(100))
+  // se confirman contra varios mercados tanto los que desaparecen como los que
+  // dejan de poder comprarse
+  const sospechosos = transiciones.filter((t) => !t.ahora.visible || !t.ahora.comprable).map((t) => t.appid);
+  const confirmacion = sospechosos.length > 0
+    ? await confirmarRetirada(sospechosos, new Limitador(100))
     : new Map();
 
   for (const t of transiciones) {
     const conf = confirmacion.get(t.appid);
     if (conf && !conf.retirado) {
-      console.log(`  ${t.appid} visible en ${conf.visibleEn.join(',')}: bloqueo regional, no retirada`);
+      if (!conf.soloEscaparate) {
+        console.log(`  ${t.appid} visible en ${conf.visibleEn.join(',')}: bloqueo regional, no retirada`);
+        continue;
+      }
+      // ficha viva en algun mercado pero sin forma de comprarlo en ninguno
+      estado.retirados[t.appid] = new Date().toISOString();
+      eventos.push(crearEvento({
+        tipo: 'no_comprable',
+        appid: t.appid,
+        nombre: t.ahora.nombre || t.antes.nombre,
+        app_type: t.ahora.tipo !== 'otro' ? t.ahora.tipo : t.antes.tipo,
+        precio: t.antes.precio,
+        fuente: 'sweep',
+        detalle: 'La ficha sigue publicada pero no hay ninguna forma de comprarlo',
+        confianza: 'confirmado',
+      }));
       continue;
     }
     // igual que en el ciclo: pasar a visible solo es "ha vuelto" si lo vimos retirar

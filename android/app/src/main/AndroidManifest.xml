@@ -28,6 +28,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".LoginActivity"
+            android:exported="false"
+            android:label="Iniciar sesión en Steam"
+            android:theme="@style/Theme.RemovedSteamGames" />
+
         <service
             android:name=".notif.MensajeriaService"
             android:exported="false">
