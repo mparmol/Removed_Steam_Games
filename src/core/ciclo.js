@@ -57,15 +57,24 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
   const resumen = { pics: null, verificadas: 0, remgc: 0, promos: 0, gratis: 0 };
 
   // ---- 0. Sembrar el registro de avisados a partir del feed ya publicado --------
-  if (!estado.avisados_migrado) {
+  // Cada siembra lleva su PROPIA marca. Compartirlas costo un ciclo entero en vano:
+  // `avisados_migrado` ya estaba puesto de una version anterior, asi que cuando se
+  // anadio la siembra de `vigilando` el bloque no llego a entrar y el seguimiento
+  // arranco sin nada que vigilar.
+  if (!estado.avisados_migrado || !estado.vigilando_migrado) {
     const previos = await appidsYaAvisados().catch(() => new Map());
-    estado.avisados = { ...Object.fromEntries(previos), ...(estado.avisados ?? {}) };
-    // los preavisos ya publicados entran tambien en vigilancia: son justo los que
-    // llevan meses en el feed diciendo "lo van a retirar" de cosas ya retiradas
-    estado.vigilando ??= {};
-    for (const [appid, desde] of previos) estado.vigilando[appid] ??= { desde, nombre: '', precio: null };
-    estado.avisados_migrado = true;
-    registrar(`  sembrados ${previos.size} appids ya avisados (y puestos en vigilancia)`);
+    if (!estado.avisados_migrado) {
+      estado.avisados = { ...Object.fromEntries(previos), ...(estado.avisados ?? {}) };
+      estado.avisados_migrado = true;
+    }
+    if (!estado.vigilando_migrado) {
+      // los preavisos ya publicados entran tambien en vigilancia: son justo los que
+      // llevan dias en el feed diciendo "lo van a retirar" de cosas ya retiradas
+      estado.vigilando ??= {};
+      for (const [appid, desde] of previos) estado.vigilando[appid] ??= { desde, nombre: '', precio: null };
+      estado.vigilando_migrado = true;
+    }
+    registrar(`  sembrados ${previos.size} appids del archivo (avisados y vigilancia)`);
   }
 
   // ---- 1. PICS: que ha cambiado -------------------------------------------------
@@ -133,12 +142,15 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       // anuncio el 23 de agosto con el flag puesto y jamas llego al feed. Es
       // exactamente el preaviso que da valor a la app, asi que va por su propia rama.
       if (porEditor.has(appid)) {
-        const enPie = conf ? conf.visibleEn.length > 0 : ahora.visible;
-        registrar(`  ${appid}: RETIRADA PEDIDA POR EL EDITOR (${enPie ? 'ficha aun publicada' : 'ya fuera'})`);
+        // "aun en pie" es que TODAVIA SE PUEDA COMPRAR, no que la ficha siga colgada:
+        // una pagina que no vende nada no es una ultima oportunidad de nada.
+        const cumplido = conf ? clasificar(conf) : (ahora.comprable ? null : 'no_comprable');
+        const enPie = cumplido == null || cumplido === 'bloqueo_regional';
+        registrar(`  ${appid}: RETIRADA PEDIDA POR EL EDITOR (${enPie ? 'aun se compra' : cumplido})`);
         delete estado.pendientes[appid];
         if (tocaAvisar(estado, appid)) {
           eventos.push(crearEvento({
-            tipo: enPie ? 'retirada_anunciada' : 'retirado',
+            tipo: enPie ? 'retirada_anunciada' : cumplido,
             appid,
             nombre: ahora.nombre || antes?.nombre || '',
             app_type: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
@@ -336,6 +348,12 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
 
     const appidsRemgc = [...new Set(nuevos.flatMap((c) => c.appids))];
     const info = appidsRemgc.length ? await consultarMuchos(appidsRemgc, limitador) : new Map();
+    // Un preaviso solo lo es si TODAVIA se puede comprar. Mirar unicamente `visible`
+    // publicaba como "ultima oportunidad" cosas ya imposibles de comprar: Nova Slash
+    // (1896510) salio asi el 24 de agosto con la ficha en pie y cero opciones de
+    // compra en los cuatro mercados, dato que ya teniamos en esta misma consulta.
+    const dudosos = appidsRemgc.filter((a) => { const d = info.get(a); return d && (!d.visible || !d.comprable); });
+    const veredicto = dudosos.length > 0 ? await confirmarRetirada(dudosos, limitador) : new Map();
 
     // Al retroceder paginas salen anuncios de juegos que YA se retiraron. Decir
     // "lo van a retirar" de algo que ya no existe es ruido: se registra y se calla.
@@ -347,9 +365,12 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         anunciados.add(appid);
 
         const dato = info.get(appid);
-        if (dato && !dato.visible) {
+        const conf = veredicto.get(appid);
+        const cumplido = conf ? clasificar(conf) : null;
+
+        // ya lo dimos por retirado en su dia: releer el hilo no es noticia nueva
+        if (cumplido != null && cumplido !== 'bloqueo_regional' && estado.retirados[appid]) {
           yaFuera++;
-          if (!estado.retirados[appid]) estado.retirados[appid] = new Date().toISOString();
           continue;
         }
         if (dato) escribirApp(estado, appid, dato);
@@ -358,14 +379,19 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         // sin este filtro tambien repetiria los que ya avisamos.
         if (!tocaAvisar(estado, appid)) continue;
 
+        // si el aviso ya se ha cumplido, se cuenta como hecho, no como oportunidad
+        const tipo = cumplido != null && cumplido !== 'bloqueo_regional' ? cumplido : 'retirada_anunciada';
+        if (tipo !== 'retirada_anunciada') estado.retirados[appid] = new Date().toISOString();
+
         eventos.push(crearEvento({
-          tipo: 'retirada_anunciada',
+          tipo,
           appid,
           nombre: dato?.nombre ?? leerApp(estado, appid)?.nombre ?? '',
           app_type: dato?.tipo ?? leerApp(estado, appid)?.tipo ?? 'otro',
           precio: dato?.precio ?? leerApp(estado, appid)?.precio,
           fuente: 'remgc',
           anuncio: com.anuncio,
+          detalle: tipo === 'retirada_anunciada' ? null : 'Anunciado en RemGC y ya retirado al comprobarlo',
           confianza: 'confirmado',
         }));
       }
@@ -385,21 +411,25 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
     // el nombre y el precio no suelen estar en el estado si la app aun no se conoce
     const conAppid = arts.filter((a) => a.appid);
     const info = conAppid.length ? await consultarMuchos(conAppid.map((a) => a.appid), limitador) : new Map();
+    // mismo criterio que en RemGC: lo que decide es si aun se puede comprar
+    const dudosos = conAppid.map((a) => a.appid).filter((x) => { const d = info.get(x); return d && (!d.visible || !d.comprable); });
+    const veredicto = dudosos.length > 0 ? await confirmarRetirada(dudosos, limitador) : new Map();
 
     for (const a of arts) {
       if (!a.appid) continue;
       const dato = info.get(a.appid);
       const conocida = leerApp(estado, a.appid);
-      // mismo criterio que con RemGC: si ya no esta a la venta, no es un preaviso
-      if (dato && !dato.visible) {
-        if (!estado.retirados[a.appid]) estado.retirados[a.appid] = new Date().toISOString();
-        continue;
-      }
+      const conf = veredicto.get(a.appid);
+      const cumplido = conf ? clasificar(conf) : null;
+      const yaCerrado = cumplido != null && cumplido !== 'bloqueo_regional';
+
+      if (yaCerrado && estado.retirados[a.appid]) continue;
       // guardamos lo aprendido: si luego lo retiran, ya tendremos nombre y precio
       if (dato) escribirApp(estado, a.appid, dato);
       if (!tocaAvisar(estado, a.appid)) continue;
+      if (yaCerrado) estado.retirados[a.appid] = new Date().toISOString();
       eventos.push(crearEvento({
-        tipo: 'retirada_anunciada',
+        tipo: yaCerrado ? cumplido : 'retirada_anunciada',
         appid: a.appid,
         nombre: dato?.nombre || conocida?.nombre || '',
         app_type: dato?.tipo ?? conocida?.tipo ?? 'otro',
