@@ -4,7 +4,9 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const DIR_FEED = process.env.DIR_FEED ?? 'data/feed';
-const MAX_LATEST = 500;
+const MAX_LATEST = 1500;
+/** Plazas reservadas a preavisos y juegos gratis, que no puede robar el ruido masivo. */
+const CUOTA_AVISOS = 600;
 
 const leerJson = async (ruta, pordefecto) => {
   try {
@@ -29,9 +31,16 @@ export async function publicar(eventos, dir = DIR_FEED) {
   const nuevos = eventos.filter((e) => !conocidos.has(e.id));
 
   if (nuevos.length > 0) {
-    const latest = [...nuevos, ...previos]
-      .sort((a, b) => b.detectado.localeCompare(a.detectado))
-      .slice(0, MAX_LATEST);
+    // Los avisos PREVIOS a la retirada son lo que da valor a la app, y el barrido
+    // genera miles de eventos de arrastre que los expulsaban de la ventana: llego a
+    // haber 469 no_comprable y un solo retirada_anunciada. Se les reserva cuota.
+    const todos = [...nuevos, ...previos].sort((a, b) => b.detectado.localeCompare(a.detectado));
+    const esAviso = (e) => e.tipo === 'retirada_anunciada' || e.tipo === 'gratis_activo' || e.tipo === 'gratis_proximo';
+
+    const avisos = todos.filter(esAviso).slice(0, CUOTA_AVISOS);
+    const resto = todos.filter((e) => !esAviso(e)).slice(0, MAX_LATEST - avisos.length);
+    const latest = [...avisos, ...resto].sort((a, b) => b.detectado.localeCompare(a.detectado));
+
     await writeFile(rutaLatest, JSON.stringify(latest, null, 0));
 
     // archivo mensual, agrupando por el mes del evento
