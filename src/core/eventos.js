@@ -93,6 +93,10 @@ export function deduplicar(eventos) {
  */
 export function esUrgente(ev) {
   if (SOLO_FEED.has(ev.tipo)) return false;
+  // Cerrar un preaviso no es noticia: del aviso ya se entero en su momento, y lo que
+  // se hace aqui es mover la ficha al grupo que le toca. Interrumpir con ello seria
+  // avisar dos veces de lo mismo, la segunda cuando ya no se puede hacer nada.
+  if (ev.fuente === 'seguimiento') return false;
   if (ev.tipo === 'gratis_activo' || ev.tipo === 'gratis_proximo') return true;
   // el preaviso es lo que permite comprarlo a tiempo: siempre interrumpe
   if (ev.tipo === 'retirada_anunciada') return true;

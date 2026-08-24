@@ -2,7 +2,7 @@
 
 import { Limitador } from '../lib/http.js';
 import * as pics from '../steam/pics.js';
-import { consultarMuchos, gratisAhora, confirmarRetirada } from '../steam/store.js';
+import { consultarMuchos, gratisAhora, confirmarRetirada, clasificar, PAIS_USUARIO } from '../steam/store.js';
 import { promosDePaquetes, promosQueTocanAvisar } from '../steam/promos.js';
 import { comentariosNuevos } from '../sources/remgc.js';
 import { articulosNuevos } from '../sources/delisted.js';
@@ -60,8 +60,12 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
   if (!estado.avisados_migrado) {
     const previos = await appidsYaAvisados().catch(() => new Map());
     estado.avisados = { ...Object.fromEntries(previos), ...(estado.avisados ?? {}) };
+    // los preavisos ya publicados entran tambien en vigilancia: son justo los que
+    // llevan meses en el feed diciendo "lo van a retirar" de cosas ya retiradas
+    estado.vigilando ??= {};
+    for (const [appid, desde] of previos) estado.vigilando[appid] ??= { desde, nombre: '', precio: null };
     estado.avisados_migrado = true;
-    registrar(`  sembrado el registro de avisados con ${previos.size} appids del archivo`);
+    registrar(`  sembrados ${previos.size} appids ya avisados (y puestos en vigilancia)`);
   }
 
   // ---- 1. PICS: que ha cambiado -------------------------------------------------
@@ -158,12 +162,24 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       // Desaparecido solo en algunos mercados: no es una retirada, pero interesa
       // saberlo. Va al feed con su propio tipo y nunca genera notificacion.
       if (conf && !conf.retirado) {
-        // Pagina viva en algun mercado pero sin forma de comprarlo en ninguno:
-        // para el usuario equivale a una retirada.
-        const tipoEvento = conf.soloEscaparate ? 'no_comprable' : 'bloqueo_regional';
-        const detalle = conf.soloEscaparate
-          ? 'La ficha sigue publicada pero no hay ninguna forma de comprarlo'
-          : `Sigue a la venta en ${conf.comprableEn.join(', ') || conf.visibleEn.join(', ')}`;
+        const tipoEvento = clasificar(conf);
+        if (tipoEvento == null) {
+          // se compra en nuestro mercado: la sospecha queda desmentida
+          registrar(`  descartado falso positivo: ${appid} (se compra en ${PAIS_USUARIO})`);
+          escribirApp(estado, appid, {
+            visible: ahora.visible,
+            nombre: ahora.nombre || antes?.nombre || '',
+            tipo: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
+            precio: ahora.precio,
+            comprable: ahora.comprable,
+          });
+          continue;
+        }
+        const detalle = tipoEvento === 'no_comprable'
+          ? (conf.comprableEn.length > 0
+            ? `Solo se puede comprar en ${conf.comprableEn.join(', ')}, que es otra tienda`
+            : 'La ficha sigue publicada pero no hay ninguna forma de comprarlo')
+          : `Sigue a la venta en ${conf.comprableEn.join(', ')}`;
         registrar(`  ${appid}: ${tipoEvento} (visible en ${conf.visibleEn.join(',')}, comprable en ${conf.comprableEn.join(',') || 'ninguno'})`);
 
         eventos.push(crearEvento({
@@ -176,7 +192,7 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
           confianza: 'confirmado',
           detalle,
         }));
-        if (conf.soloEscaparate) estado.retirados[appid] = new Date().toISOString();
+        if (tipoEvento === 'no_comprable') estado.retirados[appid] = new Date().toISOString();
         escribirApp(estado, appid, {
           visible: ahora.visible,
           nombre: ahora.nombre || antes?.nombre || '',
@@ -522,6 +538,72 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       confianza: 'confirmado',
     }));
     registrar(`  ULTIMA LLAMADA ${appid} ${p.nombre}: ${horas} h`);
+  }
+
+  // ---- 9b. Seguimiento: un preaviso cumplido deja de ser un preaviso ------------
+  //
+  // "Lo van a retirar" con su precio al lado es una invitacion a comprarlo. Cuando ya
+  // se ha retirado, esa misma ficha pasa a ser mentira, y quedarse en el grupo
+  // equivocado es peor que no estar. PICS no vuelve a mencionar estas apps una vez
+  // quietas, asi que se revisan aparte: son unos cientos, 1-2 peticiones por ciclo.
+  const CADUCIDAD_VIGILANCIA_MS = 120 * 24 * 60 * 60 * 1000;
+  const MAX_VIGILADOS = 400;
+
+  estado.vigilando ??= {};
+  // lo anunciado en ESTE ciclo entra en vigilancia a partir del siguiente
+  const anunciadosAhora = new Set(eventos.filter((e) => e.tipo === 'retirada_anunciada').map((e) => e.appid));
+
+  try {
+    for (const [appid, v] of Object.entries(estado.vigilando)) {
+      if (Date.now() - Date.parse(v.desde) > CADUCIDAD_VIGILANCIA_MS) delete estado.vigilando[appid];
+    }
+
+    const aSeguir = Object.keys(estado.vigilando)
+      .map(Number)
+      .filter((appid) => !anunciadosAhora.has(appid))
+      .slice(0, MAX_VIGILADOS);
+
+    if (aSeguir.length > 0) {
+      const info = await consultarMuchos(aSeguir, limitador);
+      const caidos = aSeguir.filter((a) => {
+        const d = info.get(a);
+        return d && (!d.visible || !d.comprable);
+      });
+      const conf = caidos.length > 0 ? await confirmarRetirada(caidos, limitador) : new Map();
+
+      let cumplidos = 0;
+      for (const appid of caidos) {
+        const c = conf.get(appid);
+        const tipo = c ? clasificar(c) : 'retirado';
+        // sigue comprandose desde aqui: el aviso todavia esta vigente
+        if (tipo == null || tipo === 'bloqueo_regional') continue;
+
+        const v = estado.vigilando[appid];
+        const d = info.get(appid);
+        eventos.push(crearEvento({
+          tipo,
+          appid,
+          nombre: d?.nombre || v.nombre || leerApp(estado, appid)?.nombre || '',
+          app_type: d?.tipo && d.tipo !== 'otro' ? d.tipo : leerApp(estado, appid)?.tipo,
+          // el precio de cuando aun se vendia: Steam ya no lo devuelve
+          precio: v.precio ?? leerApp(estado, appid)?.precio,
+          fuente: 'seguimiento',
+          detalle: 'Se ha cumplido el aviso de retirada',
+          confianza: 'confirmado',
+        }));
+        estado.retirados[appid] = new Date().toISOString();
+        delete estado.vigilando[appid];
+        cumplidos++;
+      }
+      registrar(`  seguimiento de preavisos: ${aSeguir.length} vigilados, ${cumplidos} ya retirados`);
+    }
+  } catch (e) {
+    registrar(`  seguimiento de preavisos fallo: ${e.message}`);
+  }
+
+  for (const ev of eventos) {
+    if (ev.tipo !== 'retirada_anunciada') continue;
+    estado.vigilando[ev.appid] ??= { desde: ev.detectado, nombre: ev.nombre, precio: ev.precio };
   }
 
   // ---- 10. Cerrar cursor --------------------------------------------------------

@@ -65,7 +65,19 @@ export async function publicar(eventos, dir = DIR_FEED) {
     const todos = [...nuevos, ...previos].sort((a, b) => b.detectado.localeCompare(a.detectado));
     const esAviso = (e) => e.tipo === 'retirada_anunciada' || e.tipo === 'gratis_activo' || e.tipo === 'gratis_proximo';
 
-    const avisos = todos.filter(esAviso).slice(0, CUOTA_AVISOS);
+    // Un preaviso al que ya le ha llegado la hora sobra: mostrar "lo van a retirar,
+    // 1,99 €" de algo que ya no se puede comprar es peor que no mostrar nada. Cuando
+    // del mismo juego hay despues un `retirado` o un `no_comprable`, el aviso se cae.
+    const cumplido = new Map();
+    for (const e of todos) {
+      if (e.tipo !== 'retirado' && e.tipo !== 'no_comprable') continue;
+      const previo = cumplido.get(e.appid);
+      if (!previo || previo < e.detectado) cumplido.set(e.appid, e.detectado);
+    }
+    const vigente = (e) =>
+      e.tipo !== 'retirada_anunciada' || !(cumplido.get(e.appid) > e.detectado);
+
+    const avisos = todos.filter((e) => esAviso(e) && vigente(e)).slice(0, CUOTA_AVISOS);
     const resto = todos.filter((e) => !esAviso(e)).slice(0, MAX_LATEST - avisos.length);
     const latest = [...avisos, ...resto].sort((a, b) => b.detectado.localeCompare(a.detectado));
 

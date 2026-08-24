@@ -18,7 +18,7 @@ import { cargarEstado, guardarEstado, contarVisibles, escribirApp, leerApp, RUTA
 import { ejecutarCiclo, dejaDeVerse, dejaDeVenderse } from './core/ciclo.js';
 import { publicar } from './core/feed.js';
 import { crearEvento, deduplicar, esUrgente } from './core/eventos.js';
-import { consultarMuchos, confirmarRetirada, enumerarCatalogo } from './steam/store.js';
+import { consultarMuchos, confirmarRetirada, enumerarCatalogo, clasificar } from './steam/store.js';
 import { Limitador } from './lib/http.js';
 import { descargarEstado, subirEstado } from './lib/release.js';
 
@@ -225,20 +225,26 @@ async function fusionar() {
   for (const t of transiciones) {
     const conf = confirmacion.get(t.appid);
     if (conf && !conf.retirado) {
-      if (!conf.soloEscaparate) {
-        console.log(`  ${t.appid} visible en ${conf.visibleEn.join(',')}: bloqueo regional, no retirada`);
-        continue;
+      // El barrido mira desde un solo pais y `visible` miente: lo que decide es si se
+      // puede comprar desde el nuestro. Ver `clasificar`.
+      const tipo = clasificar(conf);
+      if (tipo == null || tipo === 'bloqueo_regional') {
+        console.log(`  ${t.appid}: comprable en ${conf.comprableEn.join(',') || 'ningun sitio'} -> ${tipo ?? 'falso positivo'}`);
+        if (tipo == null) continue;
       }
-      // ficha viva en algun mercado pero sin forma de comprarlo en ninguno
       estado.retirados[t.appid] = new Date().toISOString();
       eventos.push(crearEvento({
-        tipo: 'no_comprable',
+        tipo,
         appid: t.appid,
         nombre: t.ahora.nombre || t.antes.nombre,
         app_type: t.ahora.tipo !== 'otro' ? t.ahora.tipo : t.antes.tipo,
         precio: t.antes.precio,
         fuente: 'sweep',
-        detalle: 'La ficha sigue publicada pero no hay ninguna forma de comprarlo',
+        detalle: tipo === 'no_comprable'
+          ? (conf.comprableEn.length > 0
+            ? `Solo se puede comprar en ${conf.comprableEn.join(', ')}, que es otra tienda`
+            : 'La ficha sigue publicada pero no hay ninguna forma de comprarlo')
+          : `Sigue a la venta en ${conf.comprableEn.join(', ')}`,
         confianza: 'confirmado',
       }));
       continue;

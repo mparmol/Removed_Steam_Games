@@ -34,6 +34,10 @@ export function estadoVacio() {
     // mensajes viejos para anadir juegos; sin este registro compartido, releer el hilo
     // para pillar las ediciones repetiria avisos ya dados.
     avisados: {},
+    // preavisos abiertos: appid -> {desde, nombre, precio}. Se revisan cada ciclo
+    // para poder pasarlos a "ya no se vende" cuando el aviso se cumple; PICS no
+    // vuelve a mencionar una app una vez retirada, asi que hay que preguntar aparte.
+    vigilando: {},
     // apps que NOSOTROS vimos retirar: appid -> fecha. Es un registro historico:
     // sirve para no volver a dar por nuevo algo ya retirado cuando una fuente humana
     // lo menciona tarde.

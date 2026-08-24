@@ -8,6 +8,11 @@ import { enlacesDe, crearEvento, deduplicar, esUrgente, topicDe } from '../src/c
 import { Limitador } from '../src/lib/http.js';
 import { dejaDeVerse, dejaDeVenderse } from '../src/core/ciclo.js';
 import { escribirApp, leerApp } from '../src/core/estado.js';
+import { clasificar } from '../src/steam/store.js';
+import { publicar } from '../src/core/feed.js';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const enSegundos = (ms) => Math.floor(ms / 1000);
 
@@ -215,3 +220,46 @@ test('eventos: `revivido` ya no existe como tipo', () => {
   // 433 eventos en nueve dias y ninguno era un regreso real.
   assert.throws(() => crearEvento({ tipo: 'revivido', appid: 1, fuente: 'pics' }), /tipo de evento desconocido/);
 });
+
+test('clasificar: lo que decide es si se puede comprar desde nuestro mercado', () => {
+  // Dungeon Siege III (39160): `visible` daba false en ES pero se compraba en los
+  // cuatro mercados. Se publicaba como "bloqueado en Espana" algo que estaba a la
+  // venta aqui mismo.
+  assert.equal(
+    clasificar({ retirado: false, visibleEn: ['US', 'JP'], comprableEn: ['ES', 'US', 'JP', 'CN'] }),
+    null,
+  )
+
+  // Rocket League (252950): retirado de Steam hace anos, solo queda el escaparate
+  // chino, que es otra tienda. Para quien compra desde aqui, ya no se vende.
+  assert.equal(
+    clasificar({ retirado: false, visibleEn: ['ES', 'US', 'JP'], comprableEn: ['CN'] }),
+    'no_comprable',
+  )
+
+  // bloqueo regional de verdad: a la venta en mercados normales, aqui no
+  assert.equal(
+    clasificar({ retirado: false, visibleEn: ['US', 'JP'], comprableEn: ['US', 'JP'] }),
+    'bloqueo_regional',
+  )
+  assert.equal(clasificar({ retirado: true, visibleEn: [], comprableEn: [] }), 'retirado')
+})
+
+test('feed: un preaviso cumplido se cae de la ventana', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'feed-'))
+  const aviso = crearEvento({
+    tipo: 'retirada_anunciada', appid: 777, nombre: 'X', fuente: 'remgc',
+    detectado: '2026-08-20T10:00:00.000Z', confianza: 'confirmado',
+  })
+  await publicar([aviso], dir)
+  assert.equal(JSON.parse(await readFile(join(dir, 'latest.json'), 'utf8')).length, 1)
+
+  const cumplido = crearEvento({
+    tipo: 'no_comprable', appid: 777, nombre: 'X', fuente: 'seguimiento',
+    detectado: '2026-08-24T10:00:00.000Z', confianza: 'confirmado',
+  })
+  await publicar([cumplido], dir)
+
+  const latest = JSON.parse(await readFile(join(dir, 'latest.json'), 'utf8'))
+  assert.deepEqual(latest.map((e) => e.tipo), ['no_comprable'])
+})

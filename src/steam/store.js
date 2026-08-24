@@ -59,6 +59,33 @@ export function normalizarTipo(t) {
  */
 export const PAISES_CONFIRMACION = ['ES', 'US', 'JP', 'CN'];
 
+/** El mercado desde el que compra el usuario: es el que decide que se le cuenta. */
+export const PAIS_USUARIO = 'ES';
+
+/**
+ * Traduce el resultado de `confirmarRetirada` a lo que hay que contarle al usuario.
+ *
+ * Antes cualquier cosa que no fuese una retirada global acababa etiquetada como
+ * "bloqueado en Espana", incluidos dos casos que no lo eran:
+ *
+ *  - Dungeon Siege III (39160) salio con "sigue a la venta en ES, US, JP, CN". O sea
+ *    comprable AQUI, en los cuatro mercados: no habia nada que contar. La bandera
+ *    `visible` de Steam da false en ES aunque se pueda comprar, asi que la deteccion
+ *    era un falso positivo que la propia confirmacion ya desmentia.
+ *  - Rocket League (252950) solo se compra en CN. No es un bloqueo regional: se retiro
+ *    de Steam hace anos y lo unico que queda es el escaparate chino, que va por su
+ *    cuenta. Para quien compra desde aqui, es sencillamente que ya no se vende.
+ */
+export function clasificar(conf) {
+  if (conf.retirado) return 'retirado';
+  // se puede comprar en nuestro mercado: no hay noticia
+  if (conf.comprableEn.includes(PAIS_USUARIO)) return null;
+  if (conf.comprableEn.length === 0) return 'no_comprable';
+  // el realm chino es una tienda aparte: que solo quede ahi no es una alternativa real
+  if (conf.comprableEn.every((p) => p === 'CN')) return 'no_comprable';
+  return 'bloqueo_regional';
+}
+
 /**
  * Consulta el estado de un lote de appids.
  * @returns {Promise<Map<number, {appid:number, visible:boolean, nombre:string, tipo:string, gratis:boolean, precio:string|null}>>}
