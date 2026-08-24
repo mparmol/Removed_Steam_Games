@@ -29,9 +29,14 @@ export function estadoVacio() {
     previstas: {},
     // deteccion provisional pendiente de confirmar: appid -> {tipo, visto}
     pendientes: {},
-    // apps que NOSOTROS vimos retirar: appid -> fecha.
-    // Sin esto, "ha vuelto" se dispara con cualquier app que pase a visible, incluidos
-    // los juegos que estrenan pagina de tienda y nunca estuvieron retirados.
+    // appid -> fecha del ultimo preaviso emitido, sea cual sea la fuente.
+    // El hilo de RemGC repite el mismo juego en varios mensajes y ademas se editan
+    // mensajes viejos para anadir juegos; sin este registro compartido, releer el hilo
+    // para pillar las ediciones repetiria avisos ya dados.
+    avisados: {},
+    // apps que NOSOTROS vimos retirar: appid -> fecha. Es un registro historico:
+    // sirve para no volver a dar por nuevo algo ya retirado cuando una fuente humana
+    // lo menciona tarde.
     retirados: {},
   };
 }
@@ -85,7 +90,10 @@ export const escribirApp = (estado, appid, { visible, nombre, tipo, precio, comp
     tipo ?? 'otro',
     // si ya no es visible no habra precio nuevo: conservamos el ultimo conocido
     precio ?? previo?.[3] ?? null,
-    (comprable ?? visible) ? 1 : 0,
+    // Omitir `comprable` conserva lo ultimo MEDIDO. Antes caia a `visible`, y eso
+    // reescribia el valor real en cada barrido: al dia siguiente volvia a "cambiar"
+    // y se reemitia el aviso. Suponer nada es mejor que suponer mal.
+    (comprable ?? (previo ? previo[4] === 1 : visible)) ? 1 : 0,
   ];
 };
 

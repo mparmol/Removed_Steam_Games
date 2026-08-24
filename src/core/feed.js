@@ -1,6 +1,6 @@
 // Escritura del feed que consume la app: JSON estatico servido por GitHub Pages.
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const DIR_FEED = process.env.DIR_FEED ?? 'data/feed';
@@ -16,6 +16,34 @@ const leerJson = async (ruta, pordefecto) => {
     throw e;
   }
 };
+
+/**
+ * Appids de los que YA se dio preaviso alguna vez, leyendo el archivo publicado.
+ *
+ * Sirve para sembrar `estado.avisados` sin perder la memoria acumulada: al cambiar la
+ * marca de "comentario procesado" de RemGC, el hilo entero vuelve a parecer nuevo una
+ * vez, y sin esto se repetirian de golpe cien avisos ya dados.
+ */
+export async function appidsYaAvisados(dir = DIR_FEED) {
+  const vistos = new Map();
+  let ficheros = [];
+  try {
+    ficheros = (await readdir(dir)).filter((f) => f.endsWith('.ndjson'));
+  } catch { return vistos; }
+
+  for (const f of ficheros) {
+    const crudo = await readFile(join(dir, f), 'utf8');
+    for (const linea of crudo.split('\n')) {
+      if (!linea) continue;
+      let ev;
+      try { ev = JSON.parse(linea); } catch { continue; }
+      if (ev.tipo !== 'retirada_anunciada') continue;
+      const previo = vistos.get(ev.appid);
+      if (!previo || previo < ev.detectado) vistos.set(ev.appid, ev.detectado);
+    }
+  }
+  return vistos;
+}
 
 /**
  * Anade eventos al feed: `latest.json` (ventana corta que lee la app), el archivo

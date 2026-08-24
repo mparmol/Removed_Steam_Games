@@ -10,6 +10,41 @@ import { anunciosDe, elegirObjetivos } from '../sources/anuncios.js';
 import { fichasRecientes } from '../sources/curator.js';
 import { leerApp, escribirApp } from './estado.js';
 import { crearEvento, deduplicar } from './eventos.js';
+import { appidsYaAvisados } from './feed.js';
+
+/**
+ * Deja de verse: la unica transicion que significa "lo han quitado de la tienda".
+ */
+export const dejaDeVerse = (antes, ahora) => antes.visible && !ahora.visible;
+
+/**
+ * Deja de venderse con la ficha en pie (caso Anvillage).
+ *
+ * Las DOS observaciones tienen que tener la pagina publicada. `comprable` vale true
+ * por definicion en los tipos que nunca se venden (demo, playtest, y el cajon 'otro'),
+ * asi que compararlo contra una app que ya estaba invisible hace oscilar el valor en
+ * cada pasada: 4.344 falsos "retirado" de tipo `otro` en nueve dias, los mismos
+ * appids un dia tras otro.
+ */
+export const dejaDeVenderse = (antes, ahora) =>
+  antes.visible && ahora.visible && antes.comprableConocido && antes.comprable && !ahora.comprable;
+
+/** Un mismo appid no vuelve a dar preaviso hasta pasado este plazo. */
+const REAVISO_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Registra que ya hemos avisado de este appid y dice si toca avisar.
+ * Las fuentes humanas (RemGC, delistedgames) repiten el mismo juego en varios
+ * mensajes y ademas editan los antiguos, asi que sin esto una sola retirada puede
+ * notificarse tres o cuatro veces.
+ */
+function tocaAvisar(estado, appid) {
+  const previo = estado.avisados?.[appid];
+  if (previo && Date.now() - Date.parse(previo) < REAVISO_MS) return false;
+  estado.avisados ??= {};
+  estado.avisados[appid] = new Date().toISOString();
+  return true;
+}
 
 /**
  * @param {object} estado  se MUTA con lo aprendido en el ciclo
@@ -20,6 +55,14 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
   const limitador = new Limitador(100);
   const eventos = [];
   const resumen = { pics: null, verificadas: 0, remgc: 0, promos: 0, gratis: 0 };
+
+  // ---- 0. Sembrar el registro de avisados a partir del feed ya publicado --------
+  if (!estado.avisados_migrado) {
+    const previos = await appidsYaAvisados().catch(() => new Map());
+    estado.avisados = { ...Object.fromEntries(previos), ...(estado.avisados ?? {}) };
+    estado.avisados_migrado = true;
+    registrar(`  sembrado el registro de avisados con ${previos.size} appids del archivo`);
+  }
 
   // ---- 1. PICS: que ha cambiado -------------------------------------------------
   let cambios;
@@ -57,34 +100,63 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       .filter((v) => {
         const antes = leerApp(estado, v.appid);
         if (!antes) return false;
-        return (antes.visible && !v.visible) || (antes.comprableConocido && antes.comprable && !v.comprable);
+        return dejaDeVerse(antes, v) || dejaDeVenderse(antes, v);
       })
       .map((v) => v.appid);
 
     const confirmacion = sospechosos.length > 0 ? await confirmarRetirada(sospechosos, limitador) : new Map();
 
-    // Steam marca en PICS las retiradas pedidas por el editor. Donde aparece ese flag
-    // no hay nada que interpretar: es una retirada, sin importar lo que digan los
-    // paises ni si la ficha sigue publicada.
+    // Steam marca en PICS las retiradas pedidas por el editor: es la senal mas fiable
+    // que da, y aparece DIAS antes de que la ficha desaparezca de la tienda.
     let porEditor = new Set();
     if (sospechosos.length > 0) {
       porEditor = await pics.retiradasPorEditor(sospechosos).catch(() => new Set());
-      for (const appid of porEditor) {
-        const c = confirmacion.get(appid);
-        if (c) { c.retirado = true; c.soloEscaparate = false; }
-      }
-      const regionales = [...confirmacion.values()].filter((c) => !c.retirado).length;
-      registrar(`  ${sospechosos.length} sospechosos: ${sospechosos.length - regionales} retirados` +
-        ` (${porEditor.size} confirmados por flag del editor), ${regionales} bloqueo regional`);
+      const regionales = [...confirmacion.values()].filter((c) => !c.retirado && !c.soloEscaparate).length;
+      registrar(`  ${sospechosos.length} sospechosos: ${porEditor.size} con flag de retirada del editor,` +
+        ` ${regionales} bloqueo regional`);
     }
 
     for (const [appid, ahora] of vistos) {
       const antes = leerApp(estado, appid);
       const pendiente = estado.pendientes[appid];
+      const conf = confirmacion.get(appid);
+
+      // Flag `app_retired_publisher_request`: el editor ha PEDIDO la retirada.
+      //
+      // Antes esto solo forzaba `retirado: true` en la confirmacion por paises, con lo
+      // que el caso caia en la rama de "ha cambiado la visibilidad"; como la ficha
+      // seguia publicada no habia cambio y no se emitia NADA. Nova Slash (1896510) se
+      // anuncio el 23 de agosto con el flag puesto y jamas llego al feed. Es
+      // exactamente el preaviso que da valor a la app, asi que va por su propia rama.
+      if (porEditor.has(appid)) {
+        const enPie = conf ? conf.visibleEn.length > 0 : ahora.visible;
+        registrar(`  ${appid}: RETIRADA PEDIDA POR EL EDITOR (${enPie ? 'ficha aun publicada' : 'ya fuera'})`);
+        delete estado.pendientes[appid];
+        if (tocaAvisar(estado, appid)) {
+          eventos.push(crearEvento({
+            tipo: enPie ? 'retirada_anunciada' : 'retirado',
+            appid,
+            nombre: ahora.nombre || antes?.nombre || '',
+            app_type: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
+            precio: antes?.precio ?? ahora.precio,
+            fuente: 'steam_editor',
+            detalle: 'El editor ha pedido a Steam que lo retire',
+            confianza: 'confirmado',
+          }));
+        }
+        if (!enPie) estado.retirados[appid] = new Date().toISOString();
+        escribirApp(estado, appid, {
+          visible: ahora.visible,
+          nombre: ahora.nombre || antes?.nombre || '',
+          tipo: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
+          precio: ahora.precio,
+          comprable: ahora.comprable,
+        });
+        continue;
+      }
 
       // Desaparecido solo en algunos mercados: no es una retirada, pero interesa
       // saberlo. Va al feed con su propio tipo y nunca genera notificacion.
-      const conf = confirmacion.get(appid);
       if (conf && !conf.retirado) {
         // Pagina viva en algun mercado pero sin forma de comprarlo en ninguno:
         // para el usuario equivale a una retirada.
@@ -117,13 +189,11 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
 
       if (pendiente) {
         // segunda mirada: confirmamos o descartamos
-        const sigue = pendiente.tipo === 'retirado' ? !ahora.visible : ahora.visible;
-        if (sigue) {
-          // deja constancia para poder distinguir un regreso real de un estreno
-          if (pendiente.tipo === 'retirado') estado.retirados[appid] = new Date().toISOString();
-          else delete estado.retirados[appid];
+        if (!ahora.visible) {
+          // deja constancia de que la retirada la vimos nosotros
+          estado.retirados[appid] = new Date().toISOString();
           eventos.push(crearEvento({
-            tipo: pendiente.tipo,
+            tipo: 'retirado',
             appid,
             nombre: ahora.nombre || pendiente.nombre,
             app_type: ahora.tipo !== 'otro' ? ahora.tipo : pendiente.app_type,
@@ -132,24 +202,20 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
             confianza: 'confirmado',
           }));
         } else {
-          registrar(`  descartado falso positivo: ${appid} (${pendiente.tipo})`);
+          registrar(`  descartado falso positivo: ${appid} (retirado)`);
         }
         delete estado.pendientes[appid];
-      } else if (antes && antes.visible !== ahora.visible) {
-        // Una app que pasa a visible solo "ha vuelto" si la vimos retirar. Si nunca
-        // estuvo retirada es un estreno de pagina de tienda, no una resurreccion.
-        if (ahora.visible && !estado.retirados[appid]) {
-          escribirApp(estado, appid, { visible: true, nombre: ahora.nombre, tipo: ahora.tipo, precio: ahora.precio });
-          continue;
-        }
-        // transicion nueva: se emite provisional y queda pendiente de confirmar
-        const tipo = ahora.visible ? 'revivido' : 'retirado';
+      } else if (antes && dejaDeVerse(antes, ahora)) {
+        // Solo la DESAPARICION genera evento. El camino contrario ("ha vuelto") se
+        // retiro del sistema: en la practica solo lo disparaban juegos sin estrenar
+        // que acababan de publicar ficha, nunca un regreso de verdad.
         // el nombre se pierde cuando deja de ser visible: conservamos el que teniamos
         const nombre = ahora.nombre || antes.nombre;
         const app_type = ahora.tipo !== 'otro' ? ahora.tipo : antes.tipo;
         const precio = antes.precio;
-        eventos.push(crearEvento({ tipo, appid, nombre, app_type, precio, fuente: 'pics', confianza: 'provisional' }));
-        estado.pendientes[appid] = { tipo, nombre, app_type, precio, visto: new Date().toISOString() };
+        // transicion nueva: se emite provisional y queda pendiente de confirmar
+        eventos.push(crearEvento({ tipo: 'retirado', appid, nombre, app_type, precio, fuente: 'pics', confianza: 'provisional' }));
+        estado.pendientes[appid] = { tipo: 'retirado', nombre, app_type, precio, visto: new Date().toISOString() };
       }
 
       // el estado se actualiza siempre, aunque no haya evento
@@ -205,6 +271,10 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
 
   // ---- 4. Promociones: la tienda es la verdad de "gratis ahora" ------------------
   // Deponia (214340) demostro que una promo viva puede no estar en la ventana de PICS.
+  //
+  // Esta busqueda cubre tambien los juegos de pago rebajados al 100%, que es la forma
+  // habitual de regalar un juego: Dokimon Quest (2019300, 14,79 € al -100%) salio aqui.
+  // Lo que faltaba era el PLAZO, que es lo unico que de verdad importa en un regalo.
   try {
     const { appids } = await gratisAhora(limitador);
     const antes = new Set(estado.gratis_ahora ?? []);
@@ -212,7 +282,7 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
     resumen.gratis = appids.length;
     registrar(`  gratis ahora segun la tienda: ${appids.length} (${nuevos.length} nuevos)`);
 
-    if (appids.length > 0) {
+    if (nuevos.length > 0) {
       const info = await consultarMuchos(nuevos, limitador);
       for (const appid of nuevos) {
         const dato = info.get(appid);
@@ -221,12 +291,19 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
           appid,
           nombre: dato?.nombre ?? leerApp(estado, appid)?.nombre ?? '',
           app_type: dato?.tipo ?? 'otro',
+          precio: dato?.precio,
           fuente: 'tienda',
+          // el plazo sale de `free_to_keep_ends` de la propia opcion de compra
+          vence: dato?.gratisHasta ?? null,
+          detalle: dato?.gratisHasta ? 'Anadelo a la cuenta antes del plazo y es tuyo para siempre' : null,
           confianza: 'confirmado',
         }));
+        registrar(`  GRATIS ${appid} ${dato?.nombre ?? ''}${dato?.gratisHasta ? ` hasta ${dato.gratisHasta}` : ''}`);
       }
-      estado.gratis_ahora = appids;
     }
+    // Se apunta SIEMPRE, tambien cuando la lista se vacia: si no, una promo terminada
+    // se queda pegada en el estado y ese juego no vuelve a avisar nunca.
+    estado.gratis_ahora = appids;
   } catch (e) {
     registrar(`  busqueda de gratis fallo: ${e.message}`);
   }
@@ -260,6 +337,10 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
           continue;
         }
         if (dato) escribirApp(estado, appid, dato);
+        // Releer un mensaje editado hace que su appid vuelva a considerarse nuevo:
+        // es lo que queremos (asi se pillan las ediciones que anaden un juego), pero
+        // sin este filtro tambien repetiria los que ya avisamos.
+        if (!tocaAvisar(estado, appid)) continue;
 
         eventos.push(crearEvento({
           tipo: 'retirada_anunciada',
@@ -300,6 +381,7 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       }
       // guardamos lo aprendido: si luego lo retiran, ya tendremos nombre y precio
       if (dato) escribirApp(estado, a.appid, dato);
+      if (!tocaAvisar(estado, a.appid)) continue;
       eventos.push(crearEvento({
         tipo: 'retirada_anunciada',
         appid: a.appid,
@@ -339,6 +421,7 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       for (const av of avisos) {
         if (yaAvisados.has(av.url)) continue;
         yaAvisados.add(av.url);
+        if (!tocaAvisar(estado, appid)) continue;
         encontrados++;
         const conocida = leerApp(estado, appid);
         eventos.push(crearEvento({
@@ -395,6 +478,10 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         : f.nota;
 
       estado.previstas[f.appid].avisado = true;
+      // el curador trae fecha y precio exactos, asi que avisa aunque otra fuente ya
+      // lo mencionara; pero deja constancia para que las otras no lo repitan despues
+      estado.avisados ??= {};
+      estado.avisados[f.appid] = new Date().toISOString();
       eventos.push(crearEvento({
         tipo: 'retirada_anunciada',
         appid: f.appid,

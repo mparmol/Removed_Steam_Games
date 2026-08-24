@@ -83,6 +83,13 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
     if (!appid) continue;
     const compra = item.best_purchase_option ?? item.purchase_options?.[0] ?? null;
     const gratis = item.is_free === true;
+    // Promocion "quedatelo gratis": un juego de pago con 100% de descuento durante
+    // unas horas. No es lo mismo que `is_free` (eso es un free-to-play de siempre) y
+    // trae el plazo exacto, que es justo lo que hay que poner en la notificacion.
+    // Comprobado con Dokimon Quest (2019300): discount_pct 100, is_free_to_keep true,
+    // free_to_keep_ends 1787763600 = 26 ago 2026 19:00.
+    const opciones = item.purchase_options ?? (compra ? [compra] : []);
+    const promoGratis = opciones.find((o) => o.is_free_to_keep === true) ?? null;
     // Un juego sin lanzar esta visible y SIN opciones de compra, igual que uno al que
     // le han quitado el ultimo paquete. Hay 52.752 asi en la tienda, o sea que sin
     // esta distincion el detector de "ya no se vende" seria un generador de ruido.
@@ -97,8 +104,17 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
       nombre: item.name ?? '',
       tipo,
       gratis,
-      precio: compra?.formatted_final_price ?? compra?.formatted_original_price ?? null,
+      // con una promo al 100% el precio final es "0,00 €": lo que interesa guardar
+      // es lo que costaba, para poder decir cuanto te ahorras
+      precio: (promoGratis
+        ? promoGratis.formatted_original_price
+        : compra?.formatted_final_price ?? compra?.formatted_original_price) ?? null,
       lanzado,
+      // se lo queda para siempre quien lo reclame antes de `gratisHasta`
+      promoGratis: promoGratis != null,
+      gratisHasta: promoGratis?.free_to_keep_ends
+        ? new Date(Number(promoGratis.free_to_keep_ends) * 1000).toISOString()
+        : null,
       // Si le retiran el ultimo paquete, la pagina sigue viva pero no hay forma de
       // comprarlo. Practicamente es una retirada, y mirar solo `visible` no lo ve.
       // Caso real: Anvillage (2026300) visible=true con 0 opciones de compra.

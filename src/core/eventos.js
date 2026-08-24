@@ -8,7 +8,10 @@ export const TIPOS = /** @type {const} */ ([
   'gratis_activo',
   'gratis_proximo',
   'finde_gratis',
-  'revivido',
+  // Hubo un tipo `revivido` ("ha vuelto a Steam") y se retiro del sistema: en nueve
+  // dias dio 433 eventos y NINGUNO era un regreso. Todos eran juegos sin estrenar que
+  // acababan de publicar ficha, marcados antes como retirados por el fallo de
+  // `comprable`. La informacion no compensaba el ruido.
   // no comprable desde Espana pero vivo en otros mercados: va al feed, nunca a push
   'bloqueo_regional',
   // pagina de tienda viva pero sin ninguna forma de comprarlo (le retiraron el
@@ -99,6 +102,13 @@ export function esUrgente(ev) {
   return false;
 }
 
-/** Topic de FCM al que se publica el evento. */
+/**
+ * Topic de FCM al que se publica el evento.
+ *
+ * Retirado y no-comprable se parten por tipo de contenido: son los dos que generan
+ * volumen, y quien no quiere enterarse de cada DLC o banda sonora tiene que poder
+ * cortarlos en ORIGEN. Antes `no_comprable` era un topic plano al que la app ni
+ * siquiera se suscribia, asi que no habia forma de regularlo.
+ */
 export const topicDe = (ev) =>
-  ev.tipo === 'retirado' ? `retirado_${ev.app_type}` : ev.tipo;
+  ev.tipo === 'retirado' || ev.tipo === 'no_comprable' ? `${ev.tipo}_${ev.app_type}` : ev.tipo;

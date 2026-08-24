@@ -11,7 +11,6 @@ import com.mparmol.removedsteamgames.notif.Topics
 import com.mparmol.removedsteamgames.trabajo.RefrescoWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
@@ -22,7 +21,7 @@ class App : Application() {
         Canales.crear(this)
 
         CoroutineScope(Dispatchers.IO).launch {
-            runCatching { Topics.sincronizar(this@App, Topics.activos(this@App).first()) }
+            runCatching { Topics.sincronizar(this@App) }
         }
 
         // Red de seguridad: si una notificacion se pierde (push caido, movil apagado),

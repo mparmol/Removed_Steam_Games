@@ -70,8 +70,10 @@ class MensajeriaService : FirebaseMessagingService() {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
+    // `tipo` viaja sin sufijo de contenido, pero el canal se elige por familia
     private fun canalPara(tipo: String) = when {
         tipo.startsWith("retirado") -> "retirado"
+        tipo.startsWith("no_comprable") -> "no_comprable"
         else -> tipo
     }
 
@@ -80,7 +82,7 @@ class MensajeriaService : FirebaseMessagingService() {
         "gratis_proximo" -> "Pronto gratis"
         "finde_gratis" -> "Fin de semana gratis"
         "retirada_anunciada" -> "Van a retirarlo de Steam"
-        "revivido" -> "Ha vuelto a Steam"
+        "no_comprable" -> "Ya no se puede comprar"
         else -> "Retirado de Steam"
     }
 

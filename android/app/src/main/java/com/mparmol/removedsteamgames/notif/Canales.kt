@@ -33,7 +33,9 @@ object Canales {
         Def("finde_gratis", "Fines de semana gratis", NotificationManager.IMPORTANCE_LOW, false),
         Def("retirada_anunciada", "Van a retirarlo", NotificationManager.IMPORTANCE_HIGH, true),
         Def("retirado", "Retirados", NotificationManager.IMPORTANCE_DEFAULT, false),
-        Def("revivido", "Han vuelto", NotificationManager.IMPORTANCE_LOW, false),
+        // el backend manda `no_comprable` desde hace semanas y no habia canal para el:
+        // Android descarta la notificacion si el canal no existe
+        Def("no_comprable", "Ya no se venden", NotificationManager.IMPORTANCE_DEFAULT, false),
         Def("resumen", "Resumen agrupado", NotificationManager.IMPORTANCE_DEFAULT, false),
     )
 

@@ -38,6 +38,7 @@ object Tipos {
     const val GRATIS = "gratis_activo"
     const val GRATIS_PROXIMO = "gratis_proximo"
     const val FINDE = "finde_gratis"
+    /** Retirado del sistema por falso positivo masivo; solo queda en el archivo viejo. */
     const val REVIVIDO = "revivido"
 
     /** No comprable aquí pero vivo en otros mercados. Solo feed, nunca notificación. */
@@ -63,6 +64,8 @@ object Tipos {
         "dlc" -> "DLC"
         "music" -> "Banda sonora"
         "demo" -> "Demo"
+        "playtest" -> "Playtest"
+        "hardware" -> "Hardware"
         "video" -> "Vídeo"
         "application" -> "Software"
         else -> "Otro"

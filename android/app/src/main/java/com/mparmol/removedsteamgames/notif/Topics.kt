@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import com.google.firebase.messaging.FirebaseMessaging
+import com.mparmol.removedsteamgames.datos.Evento
 import com.mparmol.removedsteamgames.datos.ajustes
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -17,40 +18,91 @@ import kotlinx.coroutines.tasks.await
 data class Topic(val id: String, val etiqueta: String, val descripcion: String, val pordefecto: Boolean)
 
 object Topics {
-    val TODOS = listOf(
+
+    /** Interruptores por tipo de suceso. */
+    val EVENTOS = listOf(
+        Topic("retirada_anunciada", "Van a retirarlo", "Aviso previo: última oportunidad de comprarlo", true),
         Topic("gratis_activo", "Gratis ahora", "Un juego se puede reclamar gratis para siempre", true),
-        Topic("gratis_proximo", "Pronto gratis", "Promocion gratuita ya programada", true),
-        Topic("finde_gratis", "Fines de semana gratis", "Jugable gratis durante unos dias", false),
-        Topic("retirada_anunciada", "Van a retirarlo", "Aviso previo: ultima oportunidad de comprarlo", true),
-        Topic("retirado_game", "Juegos retirados", "Un juego ha dejado de venderse", true),
-        Topic("retirado_dlc", "DLC retirado", "Contenido descargable retirado", false),
-        Topic("retirado_music", "Bandas sonoras retiradas", "Soundtracks retirados", false),
-        Topic("retirado_demo", "Demos retiradas", "Demos retiradas", false),
-        Topic("retirado_video", "Vídeos retirados", "Peliculas y vídeos retirados", false),
-        Topic("retirado_application", "Software retirado", "Aplicaciones y herramientas retiradas", false),
-        Topic("retirado_otro", "Otros retirados", "Resto de contenido retirado", false),
-        Topic("resumen", "Resumen agrupado", "Una sola notificacion cada varias horas con lo menos urgente", true),
+        Topic("gratis_proximo", "Pronto gratis", "Promoción gratuita ya programada", true),
+        Topic("finde_gratis", "Fines de semana gratis", "Jugable gratis durante unos días", false),
+        Topic("resumen", "Resumen agrupado", "Una sola notificación con lo menos urgente", true),
     )
 
-    private fun clave(id: String) = booleanPreferencesKey("topic_$id")
+    /**
+     * Interruptores por tipo de CONTENIDO.
+     *
+     * Antes solo cortaban `retirado_<tipo>`, y el grueso del ruido llega como
+     * `no_comprable_<tipo>`, que ademas era un topic plano al que la app ni siquiera
+     * se suscribia: apagar "demos" no apagaba nada. Ahora cada contenido gobierna sus
+     * dos topics y, sobre todo, tambien FILTRA LA LISTA de la app, que es donde el
+     * usuario los seguia viendo.
+     */
+    val CONTENIDOS = listOf(
+        Topic("game", "Juegos", "Juegos completos", true),
+        Topic("dlc", "DLC", "Contenido descargable", false),
+        Topic("music", "Bandas sonoras", "Soundtracks", false),
+        Topic("demo", "Demos", "Demos y versiones de prueba", false),
+        Topic("playtest", "Playtests", "Pruebas cerradas, se abren y cierran a diario", false),
+        Topic("application", "Software", "Aplicaciones y herramientas", false),
+        Topic("video", "Vídeos", "Películas y series", false),
+        Topic("otro", "Otros", "Todo lo que Steam no clasifica", false),
+    )
 
-    fun activos(ctx: Context): Flow<Set<String>> = ctx.ajustes.data.map { prefs ->
-        TODOS.filter { prefs[clave(it.id)] ?: it.pordefecto }.map { it.id }.toSet()
+    /** Valores de partida, para que la lista no parpadee vacia mientras carga DataStore. */
+    val EVENTOS_POR_DEFECTO = EVENTOS.filter { it.pordefecto }.map { it.id }.toSet()
+    val CONTENIDOS_POR_DEFECTO = CONTENIDOS.filter { it.pordefecto }.map { it.id }.toSet()
+
+    /** Topics de FCM que gobierna un tipo de contenido. Debe cuadrar con `topicDe` del backend. */
+    private fun topicsDe(contenido: String) = listOf("retirado_$contenido", "no_comprable_$contenido")
+
+    private val TODOS_LOS_TOPICS = EVENTOS.map { it.id } + CONTENIDOS.flatMap { topicsDe(it.id) }
+
+    private fun claveEvento(id: String) = booleanPreferencesKey("topic_$id")
+    private fun claveContenido(id: String) = booleanPreferencesKey("contenido_$id")
+
+    fun eventosActivos(ctx: Context): Flow<Set<String>> = ctx.ajustes.data.map { prefs ->
+        EVENTOS.filter { prefs[claveEvento(it.id)] ?: it.pordefecto }.map { it.id }.toSet()
     }
 
-    suspend fun cambiar(ctx: Context, id: String, activo: Boolean) {
-        ctx.ajustes.edit { it[clave(id)] = activo }
+    fun contenidosActivos(ctx: Context): Flow<Set<String>> = ctx.ajustes.data.map { prefs ->
+        CONTENIDOS.filter { prefs[claveContenido(it.id)] ?: it.pordefecto }.map { it.id }.toSet()
+    }
+
+    suspend fun cambiarEvento(ctx: Context, id: String, activo: Boolean) {
+        ctx.ajustes.edit { it[claveEvento(id)] = activo }
         aplicar(id, activo)
     }
 
-    private suspend fun aplicar(id: String, activo: Boolean) = runCatching {
+    suspend fun cambiarContenido(ctx: Context, id: String, activo: Boolean) {
+        ctx.ajustes.edit { it[claveContenido(id)] = activo }
+        for (t in topicsDe(id)) aplicar(t, activo)
+    }
+
+    /**
+     * ¿Debe verse este evento en la lista?
+     *
+     * Silenciar algo tiene que quitarlo tambien del feed: cortar solo la notificacion
+     * dejaba la pantalla igual de llena de demos y de DLC.
+     */
+    fun visible(ev: Evento, eventos: Set<String>, contenidos: Set<String>): Boolean = when (ev.tipo) {
+        // "ha vuelto a Steam" se retiro del sistema; quedan los del archivo antiguo
+        "revivido" -> false
+        "retirado", "no_comprable", "bloqueo_regional" -> ev.app_type in contenidos
+        // un tipo que no conozcamos se muestra: mejor de mas que perderse algo nuevo
+        else -> EVENTOS.none { it.id == ev.tipo } || ev.tipo in eventos
+    }
+
+    private suspend fun aplicar(topic: String, activo: Boolean) = runCatching {
         val fm = FirebaseMessaging.getInstance()
-        if (activo) fm.subscribeToTopic(id).await() else fm.unsubscribeFromTopic(id).await()
+        if (activo) fm.subscribeToTopic(topic).await() else fm.unsubscribeFromTopic(topic).await()
     }
 
     /** Sincroniza las suscripciones con lo guardado. Se llama al arrancar. */
-    suspend fun sincronizar(ctx: Context, activos: Set<String>) {
-        for (t in TODOS) aplicar(t.id, t.id in activos)
+    suspend fun sincronizar(ctx: Context) {
+        val eventos = eventosActivos(ctx).first()
+        val contenidos = contenidosActivos(ctx).first()
+        for (t in EVENTOS) aplicar(t.id, t.id in eventos)
+        for (c in CONTENIDOS) for (t in topicsDe(c.id)) aplicar(t, c.id in contenidos)
     }
 
     /**
@@ -63,21 +115,23 @@ object Topics {
     suspend fun diagnostico(ctx: Context): String = try {
         val fm = FirebaseMessaging.getInstance()
         val token = fm.token.await()
-        val activos = activos(ctx).first()
+        val eventos = eventosActivos(ctx).first()
+        val contenidos = contenidosActivos(ctx).first()
 
+        val quiero = eventos + contenidos.flatMap { topicsDe(it) }
         var ok = 0
         val fallos = mutableListOf<String>()
-        for (t in TODOS) {
+        for (t in TODOS_LOS_TOPICS) {
             try {
-                if (t.id in activos) fm.subscribeToTopic(t.id).await() else fm.unsubscribeFromTopic(t.id).await()
+                if (t in quiero) fm.subscribeToTopic(t).await() else fm.unsubscribeFromTopic(t).await()
                 ok++
             } catch (e: Exception) {
-                fallos.add("${t.id}: ${e.message}")
+                fallos.add("$t: ${e.message}")
             }
         }
         buildString {
             append("Token FCM: ${token.take(22)}…\n")
-            append("Suscrito a $ok de ${TODOS.size} categorías")
+            append("Suscripciones al día: $ok de ${TODOS_LOS_TOPICS.size} (${quiero.size} activas)")
             if (fallos.isNotEmpty()) append("\n\nFallos:\n" + fallos.joinToString("\n"))
         }
     } catch (e: Exception) {

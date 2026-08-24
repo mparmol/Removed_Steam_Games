@@ -82,7 +82,13 @@ const PAGINAS_MIN = 5;
  * no sirven para decidir que es nuevo comparando con un maximo. Hay que llevar el
  * registro explicito de lo ya procesado.
  *
- * @param {Set<string>|string[]} vistos  ids ya procesados
+ * Y OJO con las EDICIONES: la gente edita mensajes viejos para anadir juegos. El
+ * mensaje 582805931178592062 se proceso el 22 de agosto con dos appids y despues se
+ * le anadio "Edit: [quote]...store.steampowered.com/app/1896510..." con Nova Slash,
+ * que nunca llego a reportarse porque el id ya estaba visto. Por eso la marca de
+ * procesado incluye los appids del mensaje: si aparecen otros, vuelve a ser nuevo.
+ *
+ * @param {Set<string>|string[]} vistos  marcas `id:appids` ya procesadas
  * @param {number|null} ultimoTotal      total_count de la ejecucion anterior
  */
 export async function comentariosNuevos(vistos = [], ultimoTotal = null, limitador = null) {
@@ -106,11 +112,12 @@ export async function comentariosNuevos(vistos = [], ultimoTotal = null, limitad
     const crudos = recortarJson(html, 'comments_raw') ?? {};
     for (const [id, c] of Object.entries(crudos)) {
       const texto = String(c.text ?? '');
-      comentarios.push({ id, texto, autor: c.author ?? null, appids: appidsDeTexto(texto), anuncio: anuncioDeTexto(texto) });
+      const appids = appidsDeTexto(texto);
+      comentarios.push({ id, texto, autor: c.author ?? null, appids, anuncio: anuncioDeTexto(texto), marca: marcaDe(id, appids) });
     }
   }
 
-  const nuevos = comentarios.filter((c) => !yaVistos.has(c.id));
+  const nuevos = comentarios.filter((c) => !yaVistos.has(c.marca));
 
   return {
     total,
@@ -118,8 +125,11 @@ export async function comentariosNuevos(vistos = [], ultimoTotal = null, limitad
     paginasLeidas: cuantasPaginas,
     comentarios,
     nuevos,
-    // se conservan mas ids de los que caben en las paginas leidas, por si el hilo
+    // se conservan mas marcas de las que caben en las paginas leidas, por si el hilo
     // se mueve mucho entre ciclos
-    vistos: [...comentarios.map((c) => c.id), ...yaVistos].slice(0, 600),
+    vistos: [...new Set([...comentarios.map((c) => c.marca), ...yaVistos])].slice(0, 900),
   };
 }
+
+/** Identidad de un comentario a efectos de "ya procesado": id + juegos que menciona. */
+const marcaDe = (id, appids) => (appids.length ? `${id}:${[...appids].sort((a, b) => a - b).join(',')}` : id);

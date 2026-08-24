@@ -6,6 +6,8 @@ import { promosDePaquetes, promosQueTocanAvisar } from '../src/steam/promos.js';
 import { recortarJson, appidsDeTexto, anuncioDeTexto } from '../src/sources/remgc.js';
 import { enlacesDe, crearEvento, deduplicar, esUrgente, topicDe } from '../src/core/eventos.js';
 import { Limitador } from '../src/lib/http.js';
+import { dejaDeVerse, dejaDeVenderse } from '../src/core/ciclo.js';
+import { escribirApp, leerApp } from '../src/core/estado.js';
 
 const enSegundos = (ms) => Math.floor(ms / 1000);
 
@@ -171,4 +173,45 @@ test('reparto de shards: por appid esta sesgado, por posicion no', () => {
   [...appids].sort((a, b) => a - b).forEach((_, i) => { porPosicion[i % 12] += 1; });
   const pos = Object.values(porPosicion);
   assert.equal(Math.max(...pos) - Math.min(...pos) <= 1, true, 'por posicion queda equilibrado');
+});
+
+test('transiciones: comparar `comprable` a traves de una app invisible es lo que generaba el ruido', () => {
+  // `comprable` vale true por definicion en los tipos que nunca se venden ('otro',
+  // demo, playtest). Con la app ya invisible, cada barrido veia oscilar el valor y
+  // reemitia "retirado": 4.344 falsos de tipo `otro` en nueve dias, los mismos
+  // appids una noche tras otra (2855560 "流亡黯道" salio seis dias seguidos).
+  const yaFuera = { visible: false, comprable: false, comprableConocido: true };
+  const observado = { visible: false, comprable: true };
+  assert.equal(dejaDeVerse(yaFuera, observado), false);
+  assert.equal(dejaDeVenderse(yaFuera, observado), false, 'sin ficha publicada no hay nada que comparar');
+
+  // el caso legitimo (Anvillage): ficha viva antes y ahora, pero se queda sin paquetes
+  const aLaVenta = { visible: true, comprable: true, comprableConocido: true };
+  assert.equal(dejaDeVenderse(aLaVenta, { visible: true, comprable: false }), true);
+  // y la retirada de toda la vida
+  assert.equal(dejaDeVerse(aLaVenta, { visible: false, comprable: false }), true);
+});
+
+test('estado: omitir `comprable` conserva lo medido, no lo deduce de `visible`', () => {
+  // Deducirlo de `visible` hacia que cada barrido reescribiera el valor real; al dia
+  // siguiente volvia a "cambiar" y se repetia el aviso. 942 juegos -> 7.716 eventos.
+  const estado = { apps: {} };
+  escribirApp(estado, 42, { visible: true, nombre: 'X', tipo: 'game', precio: '9,99€', comprable: false });
+  assert.equal(leerApp(estado, 42).comprable, false);
+
+  escribirApp(estado, 42, { visible: true, nombre: 'X', tipo: 'game', precio: '9,99€' });
+  assert.equal(leerApp(estado, 42).comprable, false, 'sin dato nuevo se conserva el ultimo medido');
+});
+
+test('topics: retirado y no-comprable se parten por tipo de contenido', () => {
+  // `no_comprable` era un topic plano al que la app ni se suscribia: no habia forma
+  // de silenciar la avalancha de DLC ni de demos.
+  assert.equal(topicDe({ tipo: 'no_comprable', app_type: 'dlc' }), 'no_comprable_dlc');
+  assert.equal(topicDe({ tipo: 'retirado', app_type: 'demo' }), 'retirado_demo');
+  assert.equal(topicDe({ tipo: 'retirada_anunciada', app_type: 'game' }), 'retirada_anunciada');
+});
+
+test('eventos: `revivido` ya no existe como tipo', () => {
+  // 433 eventos en nueve dias y ninguno era un regreso real.
+  assert.throws(() => crearEvento({ tipo: 'revivido', appid: 1, fuente: 'pics' }), /tipo de evento desconocido/);
 });

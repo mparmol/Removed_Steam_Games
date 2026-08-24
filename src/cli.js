@@ -15,7 +15,7 @@ import { readFile, writeFile, readdir, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { cargarEstado, guardarEstado, contarVisibles, escribirApp, leerApp, RUTA_ESTADO } from './core/estado.js';
-import { ejecutarCiclo } from './core/ciclo.js';
+import { ejecutarCiclo, dejaDeVerse, dejaDeVenderse } from './core/ciclo.js';
 import { publicar } from './core/feed.js';
 import { crearEvento, deduplicar, esUrgente } from './core/eventos.js';
 import { consultarMuchos, confirmarRetirada, enumerarCatalogo } from './steam/store.js';
@@ -196,14 +196,19 @@ async function fusionar() {
       // Tambien la transicion de comprable: el barrido es la unica pasada que mira
       // TODO el catalogo, asi que sin esto un juego al que le quitan el ultimo
       // paquete no se detecta nunca si PICS no vuelve a mencionarlo (caso Anvillage).
-      if (antes && (antes.visible !== ahora.visible || (antes.comprableConocido && antes.comprable !== ahora.comprable))) {
+      if (antes && (dejaDeVerse(antes, ahora) || dejaDeVenderse(antes, ahora))) {
         transiciones.push({ appid, antes, ahora, modo: parcial.modo });
       }
+      // OJO con `comprable`: omitirlo aqui lo hacia caer a su valor por defecto, que
+      // es `visible`. Cada barrido reescribia "comprable = visible", el siguiente
+      // volvia a ver la diferencia y reemitia el aviso: los mismos 942 juegos dieron
+      // 7.716 eventos "ya no se vende" en nueve dias, uno por app y noche.
       escribirApp(estado, appid, {
         visible: ahora.visible,
         nombre: ahora.nombre || antes?.nombre || '',
         tipo: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
         precio: ahora.precio,
+        comprable: ahora.comprable,
       });
     }
   }
@@ -212,7 +217,7 @@ async function fusionar() {
   // este contraste, los bloqueos regionales se cuelan como retiradas (medido: 4 de 7).
   // se confirman contra varios mercados tanto los que desaparecen como los que
   // dejan de poder comprarse
-  const sospechosos = transiciones.filter((t) => !t.ahora.visible || !t.ahora.comprable).map((t) => t.appid);
+  const sospechosos = transiciones.map((t) => t.appid);
   const confirmacion = sospechosos.length > 0
     ? await confirmarRetirada(sospechosos, new Limitador(100))
     : new Map();
@@ -238,13 +243,10 @@ async function fusionar() {
       }));
       continue;
     }
-    // igual que en el ciclo: pasar a visible solo es "ha vuelto" si lo vimos retirar
-    if (t.ahora.visible && !estado.retirados[t.appid]) continue;
-    if (t.ahora.visible) delete estado.retirados[t.appid];
-    else estado.retirados[t.appid] = new Date().toISOString();
+    estado.retirados[t.appid] = new Date().toISOString();
 
     eventos.push(crearEvento({
-      tipo: t.ahora.visible ? 'revivido' : 'retirado',
+      tipo: 'retirado',
       appid: t.appid,
       nombre: t.ahora.nombre || t.antes.nombre,
       app_type: t.ahora.tipo !== 'otro' ? t.ahora.tipo : t.antes.tipo,

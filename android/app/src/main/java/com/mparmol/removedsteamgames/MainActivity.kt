@@ -64,13 +64,20 @@ fun Pantalla() {
     var seleccionado by remember { mutableStateOf<Evento?>(null) }
     var enAjustes by remember { mutableStateOf(false) }
 
-    // Filtros de marcar/desmarcar: se parte de "todo visible" y se van ocultando.
-    var ocultos by remember { mutableStateOf(setOf<String>()) }
+    // Un boton, un grupo: pulsar "Lo van a retirar" deja SOLO eso. Antes cada chip
+    // ocultaba su grupo y para ver una categoria habia que apagar las otras siete.
+    // Volver a pulsar el chip elegido devuelve a "Todo".
+    var tipoElegido by remember { mutableStateOf<String?>(null) }
+    var contenidoElegido by remember { mutableStateOf<String?>(null) }
     var soloHoy by remember { mutableStateOf(false) }
     var ocultarPoseidos by remember { mutableStateOf(false) }
 
     val poseidos by Biblioteca.poseidos(ctx).collectAsStateWithLifecycle(initialValue = emptySet())
     val deseados by Biblioteca.deseados(ctx).collectAsStateWithLifecycle(initialValue = emptySet())
+
+    // Lo silenciado en Ajustes desaparece tambien de la lista, no solo de los avisos.
+    val eventosActivos by Topics.eventosActivos(ctx).collectAsStateWithLifecycle(initialValue = Topics.EVENTOS_POR_DEFECTO)
+    val contenidosActivos by Topics.contenidosActivos(ctx).collectAsStateWithLifecycle(initialValue = Topics.CONTENIDOS_POR_DEFECTO)
 
     fun refrescar() {
         if (cargando) return
@@ -102,15 +109,19 @@ fun Pantalla() {
                 Ajustes()
             } else {
                 Listado(
-                    eventos = eventos,
-                    ocultos = ocultos,
+                    eventos = remember(eventos, eventosActivos, contenidosActivos) {
+                        eventos.filter { Topics.visible(it, eventosActivos, contenidosActivos) }
+                    },
+                    tipoElegido = tipoElegido,
+                    contenidoElegido = contenidoElegido,
                     soloHoy = soloHoy,
                     ocultarPoseidos = ocultarPoseidos,
                     poseidos = poseidos,
                     deseados = deseados,
                     cargando = cargando,
                     error = error,
-                    alAlternarTipo = { ocultos = if (it in ocultos) ocultos - it else ocultos + it },
+                    alElegirTipo = { tipoElegido = if (it == tipoElegido) null else it },
+                    alElegirContenido = { contenidoElegido = if (it == contenidoElegido) null else it },
                     alAlternarHoy = { soloHoy = !soloHoy },
                     alAlternarPoseidos = { ocultarPoseidos = !ocultarPoseidos },
                     alPulsar = { seleccionado = it },
@@ -132,24 +143,33 @@ private fun esDeHoy(iso: String): Boolean = runCatching {
 @Composable
 private fun Listado(
     eventos: List<Evento>,
-    ocultos: Set<String>,
+    tipoElegido: String?,
+    contenidoElegido: String?,
     soloHoy: Boolean,
     ocultarPoseidos: Boolean,
     poseidos: Set<Int>,
     deseados: Set<Int>,
     cargando: Boolean,
     error: String?,
-    alAlternarTipo: (String) -> Unit,
+    alElegirTipo: (String) -> Unit,
+    alElegirContenido: (String) -> Unit,
     alAlternarHoy: () -> Unit,
     alAlternarPoseidos: () -> Unit,
     alPulsar: (Evento) -> Unit,
     alMarcar: (Int, Boolean) -> Unit,
 ) {
-    val tiposPresentes = remember(eventos) { eventos.map { it.tipo }.distinct().sorted() }
+    // Los preavisos primero aunque sean de ayer: es lo unico que aun se puede comprar.
+    val tiposPresentes = remember(eventos) {
+        eventos.map { it.tipo }.distinct().sortedBy { if (it == Tipos.ANUNCIADA) "" else Tipos.etiqueta(it) }
+    }
+    val contenidosPresentes = remember(eventos) {
+        eventos.map { it.app_type }.distinct().sortedBy { Tipos.etiquetaContenido(it) }
+    }
 
-    val visibles = remember(eventos, ocultos, soloHoy, ocultarPoseidos, poseidos) {
+    val visibles = remember(eventos, tipoElegido, contenidoElegido, soloHoy, ocultarPoseidos, poseidos) {
         eventos.filter { ev ->
-            ev.tipo !in ocultos &&
+            (tipoElegido == null || ev.tipo == tipoElegido) &&
+                (contenidoElegido == null || ev.app_type == contenidoElegido) &&
                 (!soloHoy || esDeHoy(ev.detectado)) &&
                 (!ocultarPoseidos || ev.appid !in poseidos)
         }
@@ -167,17 +187,42 @@ private fun Listado(
             )
         }
 
-        // Chips de tipo: marcado = se muestra, desmarcado = oculto
+        // Un chip = un grupo, y solo ese grupo. El chip pulsado se apaga al repetir.
         Row(
             Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            FilterChip(
+                selected = tipoElegido == null,
+                onClick = { tipoElegido?.let(alElegirTipo) },
+                label = { Text("Todo (${eventos.size})") },
+            )
             tiposPresentes.forEach { t ->
                 val cuantos = eventos.count { it.tipo == t }
                 FilterChip(
-                    selected = t !in ocultos,
-                    onClick = { alAlternarTipo(t) },
+                    selected = t == tipoElegido,
+                    onClick = { alElegirTipo(t) },
                     label = { Text("${Tipos.etiqueta(t)} ($cuantos)") },
+                )
+            }
+        }
+
+        // Segunda fila: por tipo de contenido, con el mismo criterio
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(
+                selected = contenidoElegido == null,
+                onClick = { contenidoElegido?.let(alElegirContenido) },
+                label = { Text("Cualquier contenido") },
+            )
+            contenidosPresentes.forEach { c ->
+                val cuantos = eventos.count { it.app_type == c }
+                FilterChip(
+                    selected = c == contenidoElegido,
+                    onClick = { alElegirContenido(c) },
+                    label = { Text("${Tipos.etiquetaContenido(c)} ($cuantos)") },
                 )
             }
         }
@@ -204,7 +249,11 @@ private fun Listado(
 
         if (visibles.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(if (cargando) "Cargando…" else "Nada que mostrar con estos filtros")
+                Text(
+                    if (cargando) "Cargando…"
+                    else "Nada que mostrar. Revisa los filtros de arriba y lo que tengas apagado en Ajustes.",
+                    Modifier.padding(32.dp),
+                )
             }
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
@@ -308,7 +357,8 @@ private fun Detalle(ev: Evento, lotengo: Boolean, lodeseo: Boolean, alCerrar: ()
 private fun Ajustes() {
     val ctx = LocalContext.current
     val ambito = rememberCoroutineScope()
-    val activos by Topics.activos(ctx).collectAsStateWithLifecycle(initialValue = emptySet())
+    val eventosActivos by Topics.eventosActivos(ctx).collectAsStateWithLifecycle(initialValue = Topics.EVENTOS_POR_DEFECTO)
+    val contenidosActivos by Topics.contenidosActivos(ctx).collectAsStateWithLifecycle(initialValue = Topics.CONTENIDOS_POR_DEFECTO)
     val config by Biblioteca.config(ctx).collectAsStateWithLifecycle(initialValue = Biblioteca.Config("", "", null))
 
     var diagnostico by remember { mutableStateOf<String?>(null) }
@@ -433,20 +483,46 @@ private fun Ajustes() {
             }
             HorizontalDivider()
 
-            Text(
-                "Qué quieres que te notifique",
-                Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp),
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Column(Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp)) {
+                Text("Qué quieres que te avise", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Lo que apagues aquí deja de notificarse Y deja de aparecer en la lista.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
-        items(Topics.TODOS, key = { it.id }) { t ->
+        items(Topics.EVENTOS, key = { "ev_" + it.id }) { t ->
             ListItem(
                 headlineContent = { Text(t.etiqueta) },
                 supportingContent = { Text(t.descripcion, style = MaterialTheme.typography.bodySmall) },
                 trailingContent = {
                     Switch(
-                        checked = t.id in activos,
-                        onCheckedChange = { v -> ambito.launch { Topics.cambiar(ctx, t.id, v) } },
+                        checked = t.id in eventosActivos,
+                        onCheckedChange = { v -> ambito.launch { Topics.cambiarEvento(ctx, t.id, v) } },
+                    )
+                },
+            )
+            HorizontalDivider()
+        }
+        item {
+            Column(Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp)) {
+                Text("Qué contenido te interesa", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Se aplica a los retirados y a los que dejan de venderse, que son el " +
+                        "grueso del volumen. Las demos y los playtests se abren y se cierran " +
+                        "a diario: apagarlos quita casi todo el ruido.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        items(Topics.CONTENIDOS, key = { "co_" + it.id }) { t ->
+            ListItem(
+                headlineContent = { Text(t.etiqueta) },
+                supportingContent = { Text(t.descripcion, style = MaterialTheme.typography.bodySmall) },
+                trailingContent = {
+                    Switch(
+                        checked = t.id in contenidosActivos,
+                        onCheckedChange = { v -> ambito.launch { Topics.cambiarContenido(ctx, t.id, v) } },
                     )
                 },
             )
