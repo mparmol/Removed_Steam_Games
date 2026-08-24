@@ -10,7 +10,7 @@ import { dejaDeVerse, dejaDeVenderse } from '../src/core/ciclo.js';
 import { escribirApp, leerApp } from '../src/core/estado.js';
 import { clasificar } from '../src/steam/store.js';
 import { publicar } from '../src/core/feed.js';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -260,6 +260,23 @@ test('feed: un preaviso cumplido se cae de la ventana', async () => {
   })
   await publicar([cumplido], dir)
 
+  const latest = JSON.parse(await readFile(join(dir, 'latest.json'), 'utf8'))
+  assert.deepEqual(latest.map((e) => e.tipo), ['no_comprable'])
+})
+
+test('feed: la ventana se depura aunque el ciclo no traiga nada nuevo', async () => {
+  // FOX XII: el barrido nocturno lo dio por no comprable a las 04:41 y el aviso de
+  // "lo van a retirar, 0,99 €" seguia ahi veinte horas despues, porque la ventana
+  // solo se rehacia cuando llegaban eventos nuevos.
+  const dir = await mkdtemp(join(tmpdir(), 'feed-'))
+  const base = [
+    crearEvento({ tipo: 'retirada_anunciada', appid: 3791390, nombre: 'FOX XII', fuente: 'remgc', detectado: '2026-08-19T18:46:00.000Z', confianza: 'confirmado' }),
+    crearEvento({ tipo: 'no_comprable', appid: 3791390, nombre: 'FOX XII', fuente: 'sweep', detectado: '2026-08-24T04:41:00.000Z', confianza: 'confirmado' }),
+  ]
+  await writeFile(join(dir, 'latest.json'), JSON.stringify(base))
+
+  const r = await publicar([], dir)
+  assert.equal(r.nuevos, 0)
   const latest = JSON.parse(await readFile(join(dir, 'latest.json'), 'utf8'))
   assert.deepEqual(latest.map((e) => e.tipo), ['no_comprable'])
 })

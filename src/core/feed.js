@@ -58,31 +58,36 @@ export async function publicar(eventos, dir = DIR_FEED) {
   const conocidos = new Set(previos.map((e) => e.id));
   const nuevos = eventos.filter((e) => !conocidos.has(e.id));
 
+  // La ventana se rehace SIEMPRE, aunque no haya nada nuevo. Un preaviso queda
+  // obsoleto por un evento que pudo emitir otro proceso (el barrido nocturno), y
+  // haciendolo solo cuando llegaban eventos, FOX XII seguia anunciandose a 0,99 €
+  // veinte horas despues de que el propio barrido lo diera por no comprable.
+  const todos = [...nuevos, ...previos].sort((a, b) => b.detectado.localeCompare(a.detectado));
+
+  // Los avisos PREVIOS a la retirada son lo que da valor a la app, y el barrido
+  // genera miles de eventos de arrastre que los expulsaban de la ventana: llego a
+  // haber 469 no_comprable y un solo retirada_anunciada. Se les reserva cuota.
+  const esAviso = (e) => e.tipo === 'retirada_anunciada' || e.tipo === 'gratis_activo' || e.tipo === 'gratis_proximo';
+
+  // Un preaviso al que ya le ha llegado la hora sobra: mostrar "lo van a retirar,
+  // 1,99 €" de algo que ya no se puede comprar es peor que no mostrar nada. Cuando
+  // del mismo juego hay despues un `retirado` o un `no_comprable`, el aviso se cae.
+  const cumplido = new Map();
+  for (const e of todos) {
+    if (e.tipo !== 'retirado' && e.tipo !== 'no_comprable') continue;
+    const previo = cumplido.get(e.appid);
+    if (!previo || previo < e.detectado) cumplido.set(e.appid, e.detectado);
+  }
+  const vigente = (e) => e.tipo !== 'retirada_anunciada' || !(cumplido.get(e.appid) > e.detectado);
+
+  const avisos = todos.filter((e) => esAviso(e) && vigente(e)).slice(0, CUOTA_AVISOS);
+  const resto = todos.filter((e) => !esAviso(e)).slice(0, MAX_LATEST - avisos.length);
+  const latest = [...avisos, ...resto].sort((a, b) => b.detectado.localeCompare(a.detectado));
+
+  const cambia = latest.length !== previos.length || latest.some((e, i) => e.id !== previos[i]?.id);
+  if (cambia) await writeFile(rutaLatest, JSON.stringify(latest, null, 0));
+
   if (nuevos.length > 0) {
-    // Los avisos PREVIOS a la retirada son lo que da valor a la app, y el barrido
-    // genera miles de eventos de arrastre que los expulsaban de la ventana: llego a
-    // haber 469 no_comprable y un solo retirada_anunciada. Se les reserva cuota.
-    const todos = [...nuevos, ...previos].sort((a, b) => b.detectado.localeCompare(a.detectado));
-    const esAviso = (e) => e.tipo === 'retirada_anunciada' || e.tipo === 'gratis_activo' || e.tipo === 'gratis_proximo';
-
-    // Un preaviso al que ya le ha llegado la hora sobra: mostrar "lo van a retirar,
-    // 1,99 €" de algo que ya no se puede comprar es peor que no mostrar nada. Cuando
-    // del mismo juego hay despues un `retirado` o un `no_comprable`, el aviso se cae.
-    const cumplido = new Map();
-    for (const e of todos) {
-      if (e.tipo !== 'retirado' && e.tipo !== 'no_comprable') continue;
-      const previo = cumplido.get(e.appid);
-      if (!previo || previo < e.detectado) cumplido.set(e.appid, e.detectado);
-    }
-    const vigente = (e) =>
-      e.tipo !== 'retirada_anunciada' || !(cumplido.get(e.appid) > e.detectado);
-
-    const avisos = todos.filter((e) => esAviso(e) && vigente(e)).slice(0, CUOTA_AVISOS);
-    const resto = todos.filter((e) => !esAviso(e)).slice(0, MAX_LATEST - avisos.length);
-    const latest = [...avisos, ...resto].sort((a, b) => b.detectado.localeCompare(a.detectado));
-
-    await writeFile(rutaLatest, JSON.stringify(latest, null, 0));
-
     // archivo mensual, agrupando por el mes del evento
     const porMes = new Map();
     for (const ev of nuevos) {
@@ -99,7 +104,7 @@ export async function publicar(eventos, dir = DIR_FEED) {
 
   const manifiesto = {
     actualizado: new Date().toISOString(),
-    eventos_totales: (await leerJson(rutaLatest, [])).length,
+    eventos_totales: latest.length,
     nuevos_este_ciclo: nuevos.length,
   };
   await writeFile(join(dir, 'index.json'), JSON.stringify(manifiesto, null, 2));
