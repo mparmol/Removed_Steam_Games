@@ -8,7 +8,7 @@ import { enlacesDe, crearEvento, deduplicar, esUrgente, topicDe } from '../src/c
 import { Limitador } from '../src/lib/http.js';
 import { dejaDeVerse, dejaDeVenderse, juegosDePaquetesRetirados } from '../src/core/ciclo.js';
 import { escribirApp, leerApp } from '../src/core/estado.js';
-import { clasificar } from '../src/steam/store.js';
+import { clasificar, notaSteamDb } from '../src/steam/store.js';
 import { publicar } from '../src/core/feed.js';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -297,4 +297,28 @@ test('paquetes: la retirada de un paquete manda a mirar sus juegos', () => {
   assert.deepEqual(r.afectados, [2481980])
   assert.equal(mapa[893255], undefined, 'el retirado se olvida')
   assert.deepEqual(mapa[68179], [322330], 'el vivo se aprende')
+})
+
+test('nota estilo SteamDB: pondera el porcentaje por el numero de resenas', () => {
+  // El porcentaje pelado de Steam engana con pocas resenas: "Pro Cycling Manager
+  // 2019 - Stage and Database Editor" tiene 50% de DOS resenas.
+  assert.equal(notaSteamDb(98, 389337), 97, 'Portal 2')
+  assert.equal(notaSteamDb(85, 4659), 82.2, 'Crysis 3')
+  // el 100% de tres resenas no vale lo mismo que el 100% de tres mil
+  assert.ok(notaSteamDb(100, 3) < 70)
+  assert.ok(notaSteamDb(100, 3000) > 95)
+  assert.equal(notaSteamDb(0, 0), null, 'sin resenas no hay nota')
+})
+
+test('estado: la valoracion se conserva como el precio', () => {
+  // Cuando la ficha desaparece, GetItems devuelve el item vacio: si no se capturo
+  // antes, ni el precio ni las resenas se pueden recuperar de ningun sitio.
+  const estado = { apps: {} }
+  escribirApp(estado, 7, { visible: true, nombre: 'X', tipo: 'game', precio: '9,99€', comprable: true, porcentaje: 85, resenas: 4659 })
+  assert.equal(leerApp(estado, 7).nota, 82.2)
+
+  escribirApp(estado, 7, { visible: false, nombre: 'X', tipo: 'game', comprable: false })
+  const tras = leerApp(estado, 7)
+  assert.equal(tras.nota, 82.2, 'sobrevive a la retirada')
+  assert.equal(tras.precio, '9,99€')
 })

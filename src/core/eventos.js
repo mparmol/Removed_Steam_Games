@@ -69,6 +69,13 @@ export function crearEvento(datos) {
     precio: datos.precio ?? null,
     // texto libre: en que paises sigue vendiendose, o el extracto del aviso del estudio
     detalle: datos.detalle ?? null,
+    // nota estilo SteamDB y el porcentaje crudo del que sale, capturados antes de que
+    // la ficha desaparezca; null si el juego no tiene resenas
+    nota: datos.nota ?? null,
+    resenas: datos.resenas || 0,
+    // dias estimados desde el ultimo cambio de la app en PICS: distingue una retirada
+    // de esta semana de un hallazgo de hace medio ano
+    antiguedad_dias: datos.antiguedad_dias ?? null,
     vence: datos.vence ?? null,
     enlaces: enlacesDe(datos.appid, datos.nombre, datos.anuncio),
     confianza: datos.confianza ?? 'provisional',

@@ -204,6 +204,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
             nombre: ahora.nombre || antes?.nombre || '',
             app_type: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
             precio: antes?.precio ?? ahora.precio,
+            nota: ahora.nota ?? antes?.nota,
+            resenas: ahora.resenas || antes?.resenas,
             fuente: 'steam_editor',
             detalle: 'El editor ha pedido a Steam que lo retire',
             confianza: 'confirmado',
@@ -216,6 +218,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
           tipo: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
           precio: ahora.precio,
           comprable: ahora.comprable,
+          porcentaje: ahora.porcentaje,
+          resenas: ahora.resenas,
         });
         continue;
       }
@@ -249,6 +253,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
           nombre: ahora.nombre || antes?.nombre || '',
           app_type: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
           precio: antes?.precio,
+          nota: ahora.nota ?? antes?.nota,
+          resenas: ahora.resenas || antes?.resenas,
           fuente: 'pics',
           confianza: 'confirmado',
           detalle,
@@ -260,6 +266,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
           tipo: ahora.tipo,
           precio: ahora.precio,
           comprable: ahora.comprable,
+          porcentaje: ahora.porcentaje,
+          resenas: ahora.resenas,
         });
         continue;
       }
@@ -275,6 +283,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
             nombre: ahora.nombre || pendiente.nombre,
             app_type: ahora.tipo !== 'otro' ? ahora.tipo : pendiente.app_type,
             precio: antes?.precio ?? pendiente.precio,
+            nota: ahora.nota ?? antes?.nota,
+            resenas: ahora.resenas || antes?.resenas,
             fuente: 'pics',
             confianza: 'confirmado',
           }));
@@ -291,7 +301,7 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         const app_type = ahora.tipo !== 'otro' ? ahora.tipo : antes.tipo;
         const precio = antes.precio;
         // transicion nueva: se emite provisional y queda pendiente de confirmar
-        eventos.push(crearEvento({ tipo: 'retirado', appid, nombre, app_type, precio, fuente: 'pics', confianza: 'provisional' }));
+        eventos.push(crearEvento({ tipo: 'retirado', appid, nombre, app_type, precio, nota: antes.nota, resenas: antes.resenas, fuente: 'pics', confianza: 'provisional' }));
         estado.pendientes[appid] = { tipo: 'retirado', nombre, app_type, precio, visto: new Date().toISOString() };
       }
 
@@ -302,6 +312,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         tipo: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
         precio: ahora.precio,
         comprable: ahora.comprable,
+        porcentaje: ahora.porcentaje,
+        resenas: ahora.resenas,
       });
     }
   }
@@ -369,6 +381,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
           nombre: dato?.nombre ?? leerApp(estado, appid)?.nombre ?? '',
           app_type: dato?.tipo ?? 'otro',
           precio: dato?.precio,
+          nota: dato?.nota,
+          resenas: dato?.resenas,
           fuente: 'tienda',
           // el plazo sale de `free_to_keep_ends` de la propia opcion de compra
           vence: dato?.gratisHasta ?? null,
@@ -438,6 +452,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
           nombre: dato?.nombre ?? leerApp(estado, appid)?.nombre ?? '',
           app_type: dato?.tipo ?? leerApp(estado, appid)?.tipo ?? 'otro',
           precio: dato?.precio ?? leerApp(estado, appid)?.precio,
+          nota: dato?.nota ?? leerApp(estado, appid)?.nota,
+          resenas: dato?.resenas || leerApp(estado, appid)?.resenas,
           fuente: 'remgc',
           anuncio: com.anuncio,
           detalle: tipo === 'retirada_anunciada' ? null : 'Anunciado en RemGC y ya retirado al comprobarlo',
@@ -483,6 +499,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         nombre: dato?.nombre || conocida?.nombre || '',
         app_type: dato?.tipo ?? conocida?.tipo ?? 'otro',
         precio: dato?.precio ?? conocida?.precio,
+        nota: dato?.nota ?? conocida?.nota,
+        resenas: dato?.resenas || conocida?.resenas,
         fuente: 'delistedgames',
         anuncio: a.url,
         detalle: a.titulo,
@@ -525,6 +543,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
           nombre: conocida?.nombre ?? '',
           app_type: conocida?.tipo ?? 'otro',
           precio: conocida?.precio,
+          nota: conocida?.nota,
+          resenas: conocida?.resenas,
           fuente: 'desarrollador',
           anuncio: av.url,
           detalle: av.extracto,
@@ -583,6 +603,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
         nombre: f.nombre,
         app_type: leerApp(estado, f.appid)?.tipo ?? 'game',
         precio: f.precio,
+        nota: leerApp(estado, f.appid)?.nota,
+        resenas: leerApp(estado, f.appid)?.resenas,
         fuente: 'curador',
         anuncio: f.anuncio,
         detalle,
@@ -610,6 +632,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       nombre: p.nombre,
       app_type: leerApp(estado, appid)?.tipo ?? 'game',
       precio: p.precio,
+      nota: leerApp(estado, appid)?.nota,
+      resenas: leerApp(estado, appid)?.resenas,
       fuente: 'ultima_llamada',
       anuncio: p.anuncio,
       detalle: `ULTIMA LLAMADA: lo retiran en ${horas} h`,
@@ -666,6 +690,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
           app_type: d?.tipo && d.tipo !== 'otro' ? d.tipo : leerApp(estado, appid)?.tipo,
           // el precio de cuando aun se vendia: Steam ya no lo devuelve
           precio: v.precio ?? leerApp(estado, appid)?.precio,
+          nota: d?.nota ?? leerApp(estado, appid)?.nota,
+          resenas: d?.resenas || leerApp(estado, appid)?.resenas,
           fuente: 'seguimiento',
           detalle: 'Se ha cumplido el aviso de retirada',
           confianza: 'confirmado',

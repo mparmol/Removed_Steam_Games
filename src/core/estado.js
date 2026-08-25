@@ -4,6 +4,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { dirname } from 'node:path';
+import { notaSteamDb } from '../steam/store.js';
 
 export const RUTA_ESTADO = process.env.RUTA_ESTADO ?? '.data/state.json.gz';
 
@@ -69,9 +70,10 @@ export async function guardarEstado(estado, ruta = RUTA_ESTADO) {
 
 // --- acceso comodo a la tabla de apps -----------------------------------------
 
-// fila = [visible, nombre, tipo, precio, comprable]
+// fila = [visible, nombre, tipo, precio, comprable, porcentaje, resenas]
 // El precio se guarda porque una vez retirado el juego Steam ya no lo devuelve por
-// ninguna via: si no se captura antes, la alerta no puede decir cuanto costaba.
+// ninguna via: si no se captura antes, la alerta no puede decir cuanto costaba. Con
+// las resenas pasa lo mismo: la ficha desaparece y GetItems devuelve el item vacio.
 // `comprable` distingue "pagina viva pero sin forma de comprarlo" de "a la venta".
 export const leerApp = (estado, appid) => {
   const fila = estado.apps[appid];
@@ -87,10 +89,13 @@ export const leerApp = (estado, appid) => {
     // anota. Sin esto, el primer barrido tras anadir el campo saco 500 avisos de
     // golpe de apps que ya llevaban tiempo sin poder comprarse.
     comprableConocido: fila[4] != null,
+    porcentaje: fila[5] ?? null,
+    resenas: fila[6] ?? 0,
+    nota: fila[5] == null ? null : notaSteamDb(fila[5], fila[6] ?? 0),
   };
 };
 
-export const escribirApp = (estado, appid, { visible, nombre, tipo, precio, comprable }) => {
+export const escribirApp = (estado, appid, { visible, nombre, tipo, precio, comprable, porcentaje, resenas }) => {
   const previo = estado.apps[appid];
   estado.apps[appid] = [
     visible ? 1 : 0,
@@ -102,6 +107,9 @@ export const escribirApp = (estado, appid, { visible, nombre, tipo, precio, comp
     // reescribia el valor real en cada barrido: al dia siguiente volvia a "cambiar"
     // y se reemitia el aviso. Suponer nada es mejor que suponer mal.
     (comprable ?? (previo ? previo[4] === 1 : visible)) ? 1 : 0,
+    // igual que el precio: si no viene dato nuevo se conserva el ultimo conocido
+    porcentaje ?? previo?.[5] ?? null,
+    resenas || previo?.[6] || 0,
   ];
 };
 

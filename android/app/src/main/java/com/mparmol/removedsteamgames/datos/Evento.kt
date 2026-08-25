@@ -16,11 +16,34 @@ data class Evento(
     val precio: String? = null,
     /** Países donde sigue a la venta, o el extracto del aviso del estudio. */
     val detalle: String? = null,
+    /** Nota estilo SteamDB (porcentaje ponderado por número de reseñas). */
+    val nota: Double? = null,
+    val resenas: Int = 0,
+    /** Días desde el último cambio de la app en Steam. Null si no se pudo fechar. */
+    val antiguedad_dias: Int? = null,
     val vence: String? = null,
     val enlaces: Enlaces = Enlaces(),
     val confianza: String = "confirmado",
 ) {
     val titulo: String get() = nombre.ifBlank { "appid $appid" }
+
+    /** "82% (4.659)" — vacío si el juego no tiene reseñas. */
+    val valoracion: String? get() = nota?.let {
+        "${it.toInt()}%" + if (resenas > 0) " (${"%,d".format(resenas)})" else ""
+    }
+
+    /**
+     * Lo que el feed fecha es cuándo lo vimos nosotros, no cuándo pasó. Cuando Steam
+     * deja fecharlo se dice, para no vender como novedad algo de hace meses.
+     */
+    val antiguedad: String? get() = antiguedad_dias?.let {
+        when {
+            it <= 2 -> null
+            it < 30 -> "hace $it días"
+            it < 60 -> "hace un mes"
+            else -> "hace ${it / 30} meses"
+        }
+    }
 }
 
 @Serializable

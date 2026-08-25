@@ -290,8 +290,11 @@ private fun Fila(
         },
         supportingContent = {
             val precio = ev.precio?.let { " · $it" } ?: ""
-            val extra = ev.vence?.let { " · se retira ${it.take(10)}" } ?: ""
-            Text("${Tipos.etiqueta(ev.tipo)} · ${Tipos.etiquetaContenido(ev.app_type)}$precio$extra")
+            val valoracion = ev.valoracion?.let { " · $it" } ?: ""
+            val extra = ev.vence?.let { " · se retira ${it.take(10)}" }
+                ?: ev.antiguedad?.let { " · cambió $it" }
+                ?: ""
+            Text("${Tipos.etiqueta(ev.tipo)} · ${Tipos.etiquetaContenido(ev.app_type)}$precio$valoracion$extra")
         },
         overlineContent = { Text(ev.detectado.take(16).replace('T', ' ')) },
         modifier = Modifier.clickable { alPulsar(ev) },
@@ -331,6 +334,8 @@ private fun Detalle(ev: Evento, lotengo: Boolean, lodeseo: Boolean, alCerrar: ()
                     Text(it, style = MaterialTheme.typography.bodySmall)
                 }
                 ev.precio?.let { Text("Precio: $it") }
+                ev.valoracion?.let { Text("Valoración SteamDB: $it") }
+                ev.antiguedad?.let { Text("Último cambio en Steam: $it") }
                 ev.vence?.let { Text("Se retira: ${it.take(10)}") }
                 Text("Detectado: ${ev.detectado.take(16).replace('T', ' ')}")
                 Text("Fuente: ${ev.fuente}")

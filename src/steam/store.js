@@ -49,6 +49,28 @@ export function normalizarTipo(t) {
 }
 
 /**
+ * Nota al estilo SteamDB a partir del porcentaje de reseñas positivas.
+ *
+ * Steam enseña el porcentaje pelado, que con pocas reseñas no dice nada: 50% de 2
+ * reseñas (Pro Cycling Manager 2019 Editor) y 50% de 20.000 no son lo mismo. La
+ * formula publicada por SteamDB tira ese porcentaje hacia el 50% cuanto menos
+ * respaldo tiene:
+ *
+ *   nota = p - (p - 0,5) * 2^(-log10(n + 1))
+ *
+ * Portal 2 (98% de 389.337) da 97,0; Crysis 3 (85% de 4.659) da 82,3.
+ *
+ * OJO: SteamDB calcula sobre su propio recuento y aqui se usa `summary_filtered` de
+ * Steam, asi que puede bailar alguna decima respecto a lo que muestra su web.
+ */
+export function notaSteamDb(porcentaje, resenas) {
+  if (!resenas || resenas <= 0) return null;
+  const p = porcentaje / 100;
+  const nota = p - (p - 0.5) * 2 ** (-Math.log10(resenas + 1));
+  return Math.round(nota * 1000) / 10;
+}
+
+/**
  * Paises con los que se confirma una retirada.
  *
  * Medido: consultando SOLO desde Espana, 4 de 7 candidatos a retirada resultaron
@@ -99,7 +121,8 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
     context: { language: 'spanish', country_code: pais, steam_realm: 1 },
     // el precio se pide para poder guardarlo ANTES de que el juego desaparezca:
     // una vez retirado, Steam ya no lo devuelve por ninguna via
-    data_request: { include_basic_info: true, include_release: true, include_all_purchase_options: true },
+    // `include_reviews` no cuesta una peticion aparte: viene en el mismo lote de 200
+    data_request: { include_basic_info: true, include_release: true, include_all_purchase_options: true, include_reviews: true },
   };
   const url = `${GETITEMS}?input_json=${encodeURIComponent(JSON.stringify(entrada))}`;
   const res = await pedir(url, { limitador });
@@ -123,6 +146,11 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
     const tipo = normalizarTipo(item.type);
     const lanzamiento = Number(item.release?.steam_release_date ?? 0);
     const lanzado = lanzamiento > 0 && lanzamiento * 1000 < Date.now();
+    // Se captura como el precio, y por lo mismo: en cuanto la ficha desaparece,
+    // GetItems devuelve el item vacio y las resenas ya no hay forma de recuperarlas.
+    const resumen = item.reviews?.summary_filtered ?? null;
+    const resenas = Number(resumen?.review_count ?? 0);
+    const porcentaje = resenas > 0 ? Number(resumen?.percent_positive ?? 0) : null;
     salida.set(appid, {
       appid,
       // `visible: false` cubre tanto "retirado" como "nunca existio". No los distingue,
@@ -137,6 +165,10 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
         ? promoGratis.formatted_original_price
         : compra?.formatted_final_price ?? compra?.formatted_original_price) ?? null,
       lanzado,
+      // valoracion: el porcentaje crudo de Steam y la nota ponderada estilo SteamDB
+      porcentaje,
+      resenas,
+      nota: porcentaje == null ? null : notaSteamDb(porcentaje, resenas),
       // se lo queda para siempre quien lo reclame antes de `gratisHasta`
       promoGratis: promoGratis != null,
       gratisHasta: promoGratis?.free_to_keep_ends

@@ -20,6 +20,7 @@ import { publicar } from './core/feed.js';
 import { crearEvento, deduplicar, esUrgente } from './core/eventos.js';
 import { consultarMuchos, confirmarRetirada, enumerarCatalogo, clasificar } from './steam/store.js';
 import { Limitador } from './lib/http.js';
+import { antiguedadDeCambio } from './steam/pics.js';
 import { descargarEstado, subirEstado } from './lib/release.js';
 
 const args = process.argv.slice(2);
@@ -47,6 +48,14 @@ const deTotal = Number(valor('of', 1));
  * Ordenar primero hace el reparto determinista entre jobs distintos.
  */
 const repartir = (lista) => [...lista].sort((a, b) => a - b).filter((_, i) => i % deTotal === shard);
+
+/**
+ * A partir de aqui una deteccion del barrido deja de considerarse noticia.
+ *
+ * El barrido recorre TODO el catalogo, asi que descubre a la vez cosas de ayer y de
+ * hace dos anos. Con 30 dias, del lote de 1.006 del 25 de agosto quedaban 214.
+ */
+const UMBRAL_NOVEDAD_DIAS = Number(process.env.UMBRAL_NOVEDAD_DIAS ?? 30);
 
 async function traerEstado() {
   if (remoto) {
@@ -140,7 +149,7 @@ async function bootstrap() {
   await consultarMuchos(objetivos, limitador, (h, t) => {
     if (h % 10000 === 0 || h === t) console.log(`  ${h}/${t} (${((h / t) * 100).toFixed(1)}%)`);
   }).then((vistos) => {
-    for (const [appid, d] of vistos) if (d.visible) encontradas[appid] = [1, d.nombre, d.tipo, d.precio, d.comprable ? 1 : 0];
+    for (const [appid, d] of vistos) if (d.visible) encontradas[appid] = [1, d.nombre, d.tipo, d.precio, d.comprable ? 1 : 0, d.porcentaje, d.resenas];
   });
 
   console.log(`\n${Object.keys(encontradas).length} apps visibles encontradas`);
@@ -159,7 +168,7 @@ async function sweep() {
   await consultarMuchos(mias, limitador, (h, t) => {
     if (h % 5000 === 0 || h === t) console.log(`  ${h}/${t}`);
   }).then((vistos) => {
-    for (const [appid, d] of vistos) observado[appid] = [d.visible ? 1 : 0, d.nombre, d.tipo, d.precio, d.comprable ? 1 : 0];
+    for (const [appid, d] of vistos) observado[appid] = [d.visible ? 1 : 0, d.nombre, d.tipo, d.precio, d.comprable ? 1 : 0, d.porcentaje, d.resenas];
   });
 
   console.log(`\n${Object.keys(observado).length} apps observadas`);
@@ -189,7 +198,7 @@ async function fusionar() {
     const parcial = JSON.parse(await readFile(join(dir, f), 'utf8'));
     for (const [appidStr, fila] of Object.entries(parcial.apps)) {
       const appid = Number(appidStr);
-      const ahora = { visible: fila[0] === 1, nombre: fila[1], tipo: fila[2], precio: fila[3] ?? null, comprable: fila[4] == null ? fila[0] === 1 : fila[4] === 1 };
+      const ahora = { visible: fila[0] === 1, nombre: fila[1], tipo: fila[2], precio: fila[3] ?? null, comprable: fila[4] == null ? fila[0] === 1 : fila[4] === 1, porcentaje: fila[5] ?? null, resenas: fila[6] ?? 0 };
       vistas++;
 
       const antes = leerApp(estado, appid);
@@ -209,6 +218,8 @@ async function fusionar() {
         tipo: ahora.tipo !== 'otro' ? ahora.tipo : antes?.tipo,
         precio: ahora.precio,
         comprable: ahora.comprable,
+        porcentaje: ahora.porcentaje,
+        resenas: ahora.resenas,
       });
     }
   }
@@ -222,46 +233,64 @@ async function fusionar() {
     ? await confirmarRetirada(sospechosos, new Limitador(100))
     : new Map();
 
+  // El barrido no detecta CUANDO paso algo, sino cuando lo miramos nosotros. Lo unico
+  // que Steam da gratis para fechar el hecho es el ultimo changenumber de la app, asi
+  // que se consulta para todo lo que va a salir y se descarta lo rancio.
+  const antiguedad = await antiguedadDeCambio(transiciones.map((t) => t.appid)).catch((e) => {
+    console.log(`  no se pudo fechar en PICS (${e.message}): se publica todo`);
+    return new Map();
+  });
+  let rancios = 0;
+  let regionales = 0;
+
   for (const t of transiciones) {
     const conf = confirmacion.get(t.appid);
+    const dias = antiguedad.get(t.appid) ?? null;
+
+    // Un hallazgo de hace medio ano no es una noticia de hoy. Medido en el primer
+    // barrido con `comprable` bien escrito: de 1.006 avisos, 482 eran de apps sin
+    // tocar en mas de 180 dias y solo 90 tenian menos de una semana.
+    if (dias != null && dias > UMBRAL_NOVEDAD_DIAS) {
+      rancios++;
+      continue;
+    }
+
+    let tipo = 'retirado';
+    let detalle = null;
+
     if (conf && !conf.retirado) {
       // El barrido mira desde un solo pais y `visible` miente: lo que decide es si se
       // puede comprar desde el nuestro. Ver `clasificar`.
-      const tipo = clasificar(conf);
+      tipo = clasificar(conf);
+      // Los bloqueos regionales NO se publican desde el barrido: son estados que
+      // llevan ahi meses, no cambios. Al empezar a emitirlos salieron 66 de golpe y
+      // solo 6 eran de algo movido en el ultimo mes.
       if (tipo == null || tipo === 'bloqueo_regional') {
-        console.log(`  ${t.appid}: comprable en ${conf.comprableEn.join(',') || 'ningun sitio'} -> ${tipo ?? 'falso positivo'}`);
-        if (tipo == null) continue;
+        if (tipo === 'bloqueo_regional') regionales++;
+        continue;
       }
-      estado.retirados[t.appid] = new Date().toISOString();
-      eventos.push(crearEvento({
-        tipo,
-        appid: t.appid,
-        nombre: t.ahora.nombre || t.antes.nombre,
-        app_type: t.ahora.tipo !== 'otro' ? t.ahora.tipo : t.antes.tipo,
-        precio: t.antes.precio,
-        fuente: 'sweep',
-        detalle: tipo === 'no_comprable'
-          ? (conf.comprableEn.length > 0
-            ? `Solo se puede comprar en ${conf.comprableEn.join(', ')}, que es otra tienda`
-            : 'La ficha sigue publicada pero no hay ninguna forma de comprarlo')
-          : `Sigue a la venta en ${conf.comprableEn.join(', ')}`,
-        confianza: 'confirmado',
-      }));
-      continue;
+      detalle = conf.comprableEn.length > 0
+        ? `Solo se puede comprar en ${conf.comprableEn.join(', ')}, que es otra tienda`
+        : 'La ficha sigue publicada pero no hay ninguna forma de comprarlo';
     }
-    estado.retirados[t.appid] = new Date().toISOString();
 
+    estado.retirados[t.appid] = new Date().toISOString();
     eventos.push(crearEvento({
-      tipo: 'retirado',
+      tipo,
       appid: t.appid,
       nombre: t.ahora.nombre || t.antes.nombre,
       app_type: t.ahora.tipo !== 'otro' ? t.ahora.tipo : t.antes.tipo,
       precio: t.antes.precio,
+      nota: t.antes.nota,
+      resenas: t.antes.resenas,
+      antiguedad_dias: dias,
       fuente: t.modo === 'bootstrap' ? 'bootstrap' : 'sweep',
+      detalle,
       // el barrido ya es la segunda mirada, y ademas viene contrastado por paises
       confianza: 'confirmado',
     }));
   }
+  console.log(`  descartados ${rancios} por antiguos (>${UMBRAL_NOVEDAD_DIAS} d) y ${regionales} bloqueos regionales`);
 
   const unicos = deduplicar(eventos);
   console.log(`  ${vistas} observaciones -> ${unicos.length} cambios`);

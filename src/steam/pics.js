@@ -87,6 +87,41 @@ export async function cambiosDesde(cursor, { ultimoCicloMs = null } = {}) {
  *
  * @returns {Promise<Set<number>>}
  */
+/**
+ * Ritmo medido de PICS: 12,7 changenumbers por minuto.
+ * Es lo que permite traducir un changenumber a "hace tantos dias".
+ */
+export const CAMBIOS_POR_DIA = 12.7 * 60 * 24;
+
+/**
+ * Dias transcurridos desde el ultimo cambio de cada app en PICS.
+ *
+ * Es el unico "cuando paso esto" que da Steam gratis. La fecha del feed dice cuando
+ * lo vimos NOSOTROS, que no es lo mismo: el primer barrido con el campo `comprable`
+ * bien escrito solto 1.006 avisos de golpe y 482 eran de apps que llevaban mas de
+ * medio ano sin tocarse. Distant Kingdoms daba ~189 dias; Crysis 3, 6.
+ *
+ * Es un PROXY, no un dato: mide el ultimo cambio de cualquier cosa de la app, no la
+ * fecha de retirada. Un juego retirado en febrero y parcheado la semana pasada
+ * parecera reciente.
+ *
+ * @returns {Promise<Map<number, number>>} appid -> dias (redondeados)
+ */
+export async function antiguedadDeCambio(appids) {
+  if (appids.length === 0) return new Map();
+  return await conSesion(async (user) => {
+    const actual = (await user.getProductChanges(0)).currentChangeNumber;
+    const info = await user.getProductInfo(appids, [], true);
+
+    const salida = new Map();
+    for (const [appid, p] of Object.entries(info.apps)) {
+      if (!p.changenumber) continue;
+      salida.set(Number(appid), Math.round((actual - p.changenumber) / CAMBIOS_POR_DIA));
+    }
+    return salida;
+  }, { timeoutMs: 180000 });
+}
+
 export async function retiradasPorEditor(appids) {
   if (appids.length === 0) return new Set();
   return await conSesion(async (user) => {
