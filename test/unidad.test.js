@@ -6,7 +6,7 @@ import { promosDePaquetes, promosQueTocanAvisar } from '../src/steam/promos.js';
 import { recortarJson, appidsDeTexto, anuncioDeTexto } from '../src/sources/remgc.js';
 import { enlacesDe, crearEvento, deduplicar, esUrgente, topicDe } from '../src/core/eventos.js';
 import { Limitador } from '../src/lib/http.js';
-import { dejaDeVerse, dejaDeVenderse } from '../src/core/ciclo.js';
+import { dejaDeVerse, dejaDeVenderse, juegosDePaquetesRetirados } from '../src/core/ciclo.js';
 import { escribirApp, leerApp } from '../src/core/estado.js';
 import { clasificar } from '../src/steam/store.js';
 import { publicar } from '../src/core/feed.js';
@@ -279,4 +279,22 @@ test('feed: la ventana se depura aunque el ciclo no traiga nada nuevo', async ()
   assert.equal(r.nuevos, 0)
   const latest = JSON.parse(await readFile(join(dir, 'latest.json'), 'utf8'))
   assert.deepEqual(latest.map((e) => e.tipo), ['no_comprable'])
+})
+
+test('paquetes: la retirada de un paquete manda a mirar sus juegos', () => {
+  // "Removed from store" de SteamDB es un evento de PAQUETE, y el paquete retirado
+  // ya no devuelve los appids que incluia: hay que haberlo apuntado antes.
+  const mapa = { 68179: [322330], 893255: [2481980] }
+  const vistos = new Map([
+    [68179, { packageid: 68179, visible: true, nombre: "Don't Starve Together", appids: [322330] }],
+    [893255, { packageid: 893255, visible: false, nombre: '', appids: [] }],
+    // uno retirado que nunca vimos a la venta: no se puede saber de que juego era
+    [999999, { packageid: 999999, visible: false, nombre: '', appids: [] }],
+  ])
+
+  const r = juegosDePaquetesRetirados(vistos, mapa)
+  assert.equal(r.retirados, 1)
+  assert.deepEqual(r.afectados, [2481980])
+  assert.equal(mapa[893255], undefined, 'el retirado se olvida')
+  assert.deepEqual(mapa[68179], [322330], 'el vivo se aprende')
 })

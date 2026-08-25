@@ -2,7 +2,7 @@
 
 import { Limitador } from '../lib/http.js';
 import * as pics from '../steam/pics.js';
-import { consultarMuchos, gratisAhora, confirmarRetirada, clasificar, PAIS_USUARIO } from '../steam/store.js';
+import { consultarMuchos, consultarPaquetes, gratisAhora, confirmarRetirada, clasificar, PAIS_USUARIO } from '../steam/store.js';
 import { promosDePaquetes, promosQueTocanAvisar } from '../steam/promos.js';
 import { comentariosNuevos } from '../sources/remgc.js';
 import { articulosNuevos } from '../sources/delisted.js';
@@ -28,6 +28,31 @@ export const dejaDeVerse = (antes, ahora) => antes.visible && !ahora.visible;
  */
 export const dejaDeVenderse = (antes, ahora) =>
   antes.visible && ahora.visible && antes.comprableConocido && antes.comprable && !ahora.comprable;
+
+/**
+ * Cruza los paquetes observados con el mapa guardado y devuelve los juegos que hay
+ * que ir a mirar. MUTA `mapa`: aprende los que siguen a la venta y olvida los idos.
+ *
+ * Un paquete ya retirado no devuelve sus appids, asi que solo se puede saber a que
+ * juego afectaba si lo habiamos visto antes. Los que no conociamos se ignoran en
+ * silencio: no hay forma de averiguar de que eran.
+ */
+export function juegosDePaquetesRetirados(vistos, mapa) {
+  const afectados = new Set();
+  let retirados = 0;
+
+  for (const [pkg, dato] of vistos) {
+    if (dato.visible) {
+      mapa[pkg] = dato.appids;
+      continue;
+    }
+    if (!mapa[pkg]) continue;
+    retirados++;
+    for (const a of mapa[pkg]) afectados.add(a);
+    delete mapa[pkg];
+  }
+  return { afectados: [...afectados], retirados };
+}
 
 /** Un mismo appid no vuelve a dar preaviso hasta pasado este plazo. */
 const REAVISO_MS = 30 * 24 * 60 * 60 * 1000;
@@ -92,10 +117,34 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
   registrar(`  PICS: changenumber=${cambios.actual} apps=${cambios.apps.length} pkgs=${cambios.paquetes.length}` +
     (cambios.ventanaPerdida ? `  [VENTANA PERDIDA: ${cambios.motivo} -> hace falta barrido]` : ''));
 
+  // ---- 1b. Paquetes retirados: la causa llega antes que el efecto ----------------
+  //
+  // Cuando dejan de vender un juego lo que se retira es el PAQUETE; que la ficha se
+  // quede sin opciones de compra es la consecuencia, y PICS no siempre la reporta
+  // como cambio de la app (asi se escapo Anvillage hasta el barrido nocturno). Es la
+  // senal que publica SteamDB en "Recent package events".
+  //
+  // No genera evento por si misma: el paquete 893255 de Untamed Kingdom se retiro y
+  // el juego sigue perfectamente a la venta, porque era uno de varios. Sirve como
+  // DISPARADOR para ir a mirar sus juegos en el acto.
+  let porPaquete = [];
+  if (cambios.paquetes.length > 0) {
+    try {
+      const vistos = await consultarPaquetes(cambios.paquetes, limitador);
+      estado.paquetes ??= {};
+      const { afectados, retirados } = juegosDePaquetesRetirados(vistos, estado.paquetes);
+      porPaquete = afectados;
+      registrar(`  paquetes: ${vistos.size} revisados, ${retirados} retirados de la tienda` +
+        ` -> ${porPaquete.length} juegos a comprobar`);
+    } catch (e) {
+      registrar(`  paquetes fallo: ${e.message}`);
+    }
+  }
+
   // ---- 2. Verificar candidatos + reverificar pendientes --------------------------
   // Los pendientes son detecciones provisionales del ciclo anterior: se confirman o
   // se descartan mirandolas por segunda vez.
-  const aVerificar = [...new Set([...cambios.apps, ...Object.keys(estado.pendientes).map(Number)])];
+  const aVerificar = [...new Set([...cambios.apps, ...porPaquete, ...Object.keys(estado.pendientes).map(Number)])];
 
   if (aVerificar.length > 0) {
     const vistos = await consultarMuchos(aVerificar, limitador, (hechos, total) => {

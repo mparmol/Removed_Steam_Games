@@ -154,6 +154,44 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
 }
 
 /**
+ * Estado de un lote de PAQUETES.
+ *
+ * GetItems acepta `packageid` igual que `appid`, y ahi esta la senal que publica
+ * SteamDB como "Removed from store": el paquete 893255 (Untamed Kingdom), retirado,
+ * devuelve `visible: false` y sin nombre; uno vivo devuelve `visible: true` y los
+ * appids que incluye. PICS avisa de que el paquete ha cambiado pero no deja leerlo
+ * con login anonimo (`missingToken: true`), asi que el detalle sale de aqui.
+ *
+ * @returns {Promise<Map<number, {packageid:number, visible:boolean, nombre:string, appids:number[]}>>}
+ */
+export async function consultarPaquetes(packageids, limitador) {
+  const salida = new Map();
+  for (let i = 0; i < packageids.length; i += LOTE_MAX) {
+    const lote = packageids.slice(i, i + LOTE_MAX);
+    const entrada = {
+      ids: lote.map((packageid) => ({ packageid: Number(packageid) })),
+      context: { language: 'spanish', country_code: PAIS_USUARIO, steam_realm: 1 },
+      data_request: { include_basic_info: true, include_included_items: true },
+    };
+    const url = `${GETITEMS}?input_json=${encodeURIComponent(JSON.stringify(entrada))}`;
+    const res = await pedir(url, { limitador });
+
+    for (const item of res?.response?.store_items ?? []) {
+      const packageid = Number(item.id);
+      if (!packageid) continue;
+      salida.set(packageid, {
+        packageid,
+        visible: item.visible === true,
+        nombre: item.name ?? '',
+        // un paquete ya retirado NO devuelve sus appids: el mapa hay que tenerlo de antes
+        appids: (item.included_appids ?? item.included_items?.included_appids ?? []).map(Number),
+      });
+    }
+  }
+  return salida;
+}
+
+/**
  * Confirma si unos appids estan retirados de VERDAD, mirandolos en varios mercados.
  * Solo se llama sobre candidatos, no sobre todo el catalogo, asi que el coste extra
  * es despreciable.

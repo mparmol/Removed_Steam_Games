@@ -16,6 +16,10 @@ export function estadoVacio() {
     apps: {},
     // packageid -> promo persistida con sus fechas y banderas de aviso
     promos: {},
+    // packageid -> appids que incluye, mientras el paquete siga a la venta.
+    // Un paquete ya retirado no devuelve sus appids, asi que el mapa hay que tenerlo
+    // guardado de antes para saber a que juego afecta la retirada.
+    paquetes: {},
     // appids que la busqueda de la tienda daba como gratis en el ciclo anterior
     gratis_ahora: [],
     // comentarios ya procesados del hilo RemGC (los ids NO son crecientes)
