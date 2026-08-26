@@ -1,8 +1,13 @@
 name: Vigilancia
 
-# Cada 15 min. El cron de Actions es impuntual (retrasos de 5-20 min bajo carga),
-# asi que la alerta real llega a 15-40 min del hecho. La ventana de PICS es de ~9,5 h,
-# de sobra para ese margen.
+# El cron de Actions es MUCHO mas impuntual de lo que parecia. Medido sobre 13
+# ejecuciones seguidas de un '*/15': mediana de 49 min entre arranques y un hueco de
+# 177 min. Dentro de ese hueco se retiro Astrobuilder y el aviso llego dos horas tarde.
+#
+# Por eso cada ejecucion hace VARIAS pasadas por su cuenta (ver scripts/vigilar.sh):
+# el cron solo tiene que acertar una vez cada tres horas en vez de cada quince minutos.
+# Se mantiene el '*/15' porque el grupo de concurrencia descarta lo que sobra y asi la
+# siguiente ejecucion entra en cuanto termina la anterior.
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -21,6 +26,8 @@ concurrency:
 jobs:
   ciclo:
     runs-on: ubuntu-latest
+    # Tres horas de pasadas + margen. El tope de un job son 6 h.
+    timeout-minutes: 200
     outputs:
       ventana_perdida: ${{ steps.ciclo.outputs.ventana_perdida }}
     # El contexto `secrets` NO existe dentro de un `if:` de step (solo `env`), asi que
@@ -37,29 +44,16 @@ jobs:
 
       - run: npm ci --omit=dev
 
-      - name: Recuperar el feed publicado
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/feed-preparar.sh
-
-      - name: Ejecutar ciclo
+      # Recuperar el feed + ciclo + notificar + publicar, repetido cada 15 min
+      # mientras dure el job.
+      - name: Vigilar
         id: ciclo
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DIR_FEED: feedrepo/feed
-        run: node src/cli.js watch --remoto
-
-      # ANTES de publicar: el notificador deja constancia de lo enviado en
-      # notificados.json y arranque.json, y si se publicara primero esas anotaciones
-      # se perderian y se reenviaria todo en cada ciclo.
-      # Se salta solo mientras no exista el secret, para que el resto funcione igual.
-      - name: Notificar
-        if: env.FCM_SERVICE_ACCOUNT != ''
-        env:
-          DIR_FEED: feedrepo/feed
-        run: |
-          set -o pipefail
-          node src/notificar.js 2>&1 | tee notificar.log
+          DURACION_MIN: '180'
+          INTERVALO_MIN: '15'
+        run: bash scripts/vigilar.sh
 
       # Los logs de Actions dan 403 incluso en repos publicos, asi que el fallo
       # se publica en la rama data para poder diagnosticarlo sin capturas.
@@ -68,11 +62,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/publicar-log.sh notificar.log ${{ github.workflow }}
-
-      - name: Publicar feed
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/feed-publicar.sh
 
   # Si PICS perdio la ventana, el barrido es la unica forma de saber que nos hemos
   # perdido: Steam devuelve listas vacias sin avisar, no da error.
