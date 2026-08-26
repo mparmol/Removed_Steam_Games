@@ -43,6 +43,12 @@ async function conseguirToken(cuenta) {
   return (await r.json()).access_token;
 }
 
+/** Para que el resumen diga "12 DLC" y no "12 dlc". */
+const ETIQUETAS_CONTENIDO = {
+  game: 'juegos', dlc: 'DLC', music: 'bandas sonoras', demo: 'demos',
+  playtest: 'playtests', video: 'vídeos', application: 'programas', otro: 'otros',
+};
+
 const TITULOS = {
   retirado: 'Retirado de Steam',
   retirada_anunciada: 'Van a retirarlo de Steam',
@@ -162,21 +168,31 @@ async function principal() {
 
   // El resto va agrupado: con DLC, bandas sonoras y demos incluidos, notificar uno a
   // uno seria un bombardeo diario.
-  if (resto.length > 0) {
-    const avisos = resto.filter((e) => e.tipo === 'retirada_anunciada').length;
+  //
+  // Y va agrupado POR TIPO DE CONTENIDO, a un topic por tipo. Antes era un unico
+  // resumen al topic `resumen`, que contaba TODO: con los DLC silenciados en la app
+  // seguia llegando "38 avisos mas", y al abrirla no habia nada porque la lista si los
+  // filtraba. Un aviso que lleva a una pantalla vacia es peor que no avisar.
+  const porTipo = new Map();
+  for (const ev of resto) {
+    if (!porTipo.has(ev.app_type)) porTipo.set(ev.app_type, []);
+    porTipo.get(ev.app_type).push(ev);
+  }
+
+  for (const [appType, lote] of porTipo) {
+    const avisos = lote.filter((e) => e.tipo === 'retirada_anunciada').length;
     const desglose = avisos > 0
-      ? `${avisos} con retirada anunciada` + (resto.length > avisos ? `, ${resto.length - avisos} ya retirados` : '')
-      : Object.entries(resto.reduce((a, e) => { a[e.app_type] = (a[e.app_type] ?? 0) + 1; return a; }, {}))
-          .map(([t, n]) => `${n} ${t}`).join(', ');
+      ? `${avisos} con retirada anunciada` + (lote.length > avisos ? `, ${lote.length - avisos} ya retirados` : '')
+      : `${lote.length} ${ETIQUETAS_CONTENIDO[appType] ?? appType}`;
     await enviar(token, proyecto, {
-      topic: 'resumen',
-      notification: { title: `${resto.length} avisos mas`, body: desglose },
+      topic: `resumen_${appType}`,
+      notification: { title: `${lote.length} avisos mas`, body: desglose },
       // FCM corta en 4 KB: con 490 eventos la lista completa de ids son ~8 KB y la
       // peticion entera falla. Van solo unos pocos; el resto se ve en el feed.
-      data: { tipo: 'resumen', total: String(resto.length), ids: resto.slice(0, 20).map((e) => e.id).join(',') },
-      android: { priority: 'normal', notification: { channel_id: 'resumen_v2', tag: 'resumen' } },
+      data: { tipo: 'resumen', app_type: appType, total: String(lote.length), ids: lote.slice(0, 20).map((e) => e.id).join(',') },
+      android: { priority: 'normal', notification: { channel_id: 'resumen_v2', tag: `resumen_${appType}` } },
     });
-    console.log(`  -> resumen: ${resto.length} eventos (${desglose})`);
+    console.log(`  -> resumen_${appType}: ${lote.length} eventos (${desglose})`);
   }
 
   const recordar = [...pendientes.map((e) => e.id), ...yaEnviados].slice(0, MAX_RECORDADOS);

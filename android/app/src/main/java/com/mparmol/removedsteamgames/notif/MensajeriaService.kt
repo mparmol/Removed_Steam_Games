@@ -21,6 +21,15 @@ class MensajeriaService : FirebaseMessagingService() {
         val datos = mensaje.data
         val tipo = datos["tipo"] ?: "resumen"
 
+        // Cinturon y tirantes: si el contenido esta silenciado no se muestra nada,
+        // aunque la suscripcion haya quedado desfasada. Un aviso que lleva a una lista
+        // vacia es peor que no avisar.
+        val contenido = datos["app_type"]
+        if (contenido != null && !Topics.contenidoActivo(this, contenido)) {
+            android.util.Log.i("Mensajeria", "silenciado por contenido: $contenido")
+            return
+        }
+
         val titulo = mensaje.notification?.title ?: tituloPara(tipo)
         val cuerpo = mensaje.notification?.body ?: datos["nombre"].orEmpty()
 

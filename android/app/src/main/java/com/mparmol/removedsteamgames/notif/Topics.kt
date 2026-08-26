@@ -9,6 +9,7 @@ import com.mparmol.removedsteamgames.datos.ajustes
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.tasks.await
 
 /**
@@ -25,7 +26,9 @@ object Topics {
         Topic("gratis_activo", "Gratis ahora", "Un juego se puede reclamar gratis para siempre", true),
         Topic("gratis_proximo", "Pronto gratis", "Promoción gratuita ya programada", true),
         Topic("finde_gratis", "Fines de semana gratis", "Jugable gratis durante unos días", false),
-        Topic("resumen", "Resumen agrupado", "Una sola notificación con lo menos urgente", true),
+        // El resumen ya no vive aquí: va por tipo de contenido (ver CONTENIDOS), que es
+        // lo que evita que llegue "38 avisos más" de DLC teniendo los DLC apagados.
+        Topic("resumen", "Mensajes de la app", "Avisos de la propia vigilancia, no de juegos", true),
     )
 
     /**
@@ -52,8 +55,15 @@ object Topics {
     val EVENTOS_POR_DEFECTO = EVENTOS.filter { it.pordefecto }.map { it.id }.toSet()
     val CONTENIDOS_POR_DEFECTO = CONTENIDOS.filter { it.pordefecto }.map { it.id }.toSet()
 
-    /** Topics de FCM que gobierna un tipo de contenido. Debe cuadrar con `topicDe` del backend. */
-    private fun topicsDe(contenido: String) = listOf("retirado_$contenido", "no_comprable_$contenido")
+    /**
+     * Topics de FCM que gobierna un tipo de contenido. Debe cuadrar con el backend.
+     *
+     * `resumen_<tipo>` incluido: el resumen agrupado era un unico topic que contaba
+     * TODO, asi que con los DLC silenciados seguia llegando "38 avisos mas" y la lista
+     * de la app, que si los filtraba, aparecia vacia.
+     */
+    private fun topicsDe(contenido: String) =
+        listOf("retirado_$contenido", "no_comprable_$contenido", "resumen_$contenido")
 
     private val TODOS_LOS_TOPICS = EVENTOS.map { it.id } + CONTENIDOS.flatMap { topicsDe(it.id) }
 
@@ -67,6 +77,15 @@ object Topics {
     fun contenidosActivos(ctx: Context): Flow<Set<String>> = ctx.ajustes.data.map { prefs ->
         CONTENIDOS.filter { prefs[claveContenido(it.id)] ?: it.pordefecto }.map { it.id }.toSet()
     }
+
+    /**
+     * Version bloqueante para `MensajeriaService`, que recibe el push en un callback
+     * normal y tiene que decidir en el acto si lo muestra. Ya corre en un hilo de
+     * fondo de Firebase, asi que bloquear ahi no congela nada.
+     */
+    fun contenidoActivo(ctx: Context, contenido: String): Boolean = runCatching {
+        runBlocking { contenidosActivos(ctx).first() }.contains(contenido)
+    }.getOrDefault(true)
 
     suspend fun cambiarEvento(ctx: Context, id: String, activo: Boolean) {
         ctx.ajustes.edit { it[claveEvento(id)] = activo }
