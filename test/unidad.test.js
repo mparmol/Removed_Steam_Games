@@ -9,6 +9,7 @@ import { Limitador } from '../src/lib/http.js';
 import { dejaDeVerse, dejaDeVenderse, juegosDePaquetesRetirados } from '../src/core/ciclo.js';
 import { escribirApp, leerApp } from '../src/core/estado.js';
 import { clasificar, notaSteamDb } from '../src/steam/store.js';
+import { ritmoDeCambios, anotarRitmo, RITMO_POR_DEFECTO } from '../src/steam/pics.js';
 import { publicar } from '../src/core/feed.js';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -321,4 +322,26 @@ test('estado: la valoracion se conserva como el precio', () => {
   const tras = leerApp(estado, 7)
   assert.equal(tras.nota, 82.2, 'sobrevive a la retirada')
   assert.equal(tras.precio, '9,99€')
+})
+
+test('ritmo de PICS: se calcula del histórico propio, no de una constante', () => {
+  // La constante del spike (12,7 cambios/min) se quedaba corta un 60%: contrastada
+  // el 27 de agosto contra Astrobuilder y los DLC de The Witcher 3, el ritmo real
+  // rondaba los 20. Con 12,7 las edades salian infladas 1,5x y el filtro de "30
+  // dias" cortaba de hecho en 19.
+  const min = (n) => Date.now() - n * 60000
+  // 24 h de muestras a 20 cambios/min exactos
+  const historial = [[min(1440), 1_000_000], [min(720), 1_014_400], [min(0), 1_028_800]]
+  assert.equal(Math.round(ritmoDeCambios(historial)), 20)
+
+  // sin arco suficiente no se inventa nada: se usa el valor por defecto
+  assert.equal(ritmoDeCambios([[min(60), 1], [min(0), 100000]]), RITMO_POR_DEFECTO)
+  assert.equal(ritmoDeCambios([]), RITMO_POR_DEFECTO)
+})
+
+test('ritmo: anotar poda lo viejo y conserva lo reciente', () => {
+  const viejo = Date.now() - 40 * 24 * 60 * 60 * 1000
+  const historial = anotarRitmo([[viejo, 1]], 500)
+  assert.deepEqual(historial.map((x) => x[1]), [500], 'la muestra de hace 40 dias se cae')
+  assert.equal(anotarRitmo([[Date.now(), 1]], null).length, 1, 'sin changenumber no anota')
 })

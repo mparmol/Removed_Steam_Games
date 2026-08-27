@@ -20,7 +20,7 @@ import { publicar } from './core/feed.js';
 import { crearEvento, deduplicar, esUrgente } from './core/eventos.js';
 import { consultarMuchos, confirmarRetirada, enumerarCatalogo, clasificar } from './steam/store.js';
 import { Limitador } from './lib/http.js';
-import { antiguedadDeCambio } from './steam/pics.js';
+import { antiguedadDeCambio, ritmoDeCambios } from './steam/pics.js';
 import { descargarEstado, subirEstado } from './lib/release.js';
 
 const args = process.argv.slice(2);
@@ -236,7 +236,9 @@ async function fusionar() {
   // El barrido no detecta CUANDO paso algo, sino cuando lo miramos nosotros. Lo unico
   // que Steam da gratis para fechar el hecho es el ultimo changenumber de la app, asi
   // que se consulta para todo lo que va a salir y se descarta lo rancio.
-  const antiguedad = await antiguedadDeCambio(transiciones.map((t) => t.appid)).catch((e) => {
+  const ritmo = ritmoDeCambios(estado.ritmo);
+  console.log(`  ritmo de PICS: ${ritmo.toFixed(1)} cambios/min (${(estado.ritmo ?? []).length} muestras)`);
+  const antiguedad = await antiguedadDeCambio(transiciones.map((t) => t.appid), ritmo).catch((e) => {
     console.log(`  no se pudo fechar en PICS (${e.message}): se publica todo`);
     return new Map();
   });

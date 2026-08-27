@@ -39,6 +39,10 @@ export function estadoVacio() {
     // mensajes viejos para anadir juegos; sin este registro compartido, releer el hilo
     // para pillar las ediciones repetiria avisos ya dados.
     avisados: {},
+    // muestras [ms, changenumber] para calcular a que ritmo avanza PICS. Steam va a
+    // rafagas (medido: de 4,6 a mas de 200 cambios/min), asi que traducir un
+    // changenumber a dias con una constante fija falla casi siempre.
+    ritmo: [],
     // preavisos abiertos: appid -> {desde, nombre, precio}. Se revisan cada ciclo
     // para poder pasarlos a "ya no se vende" cuando el aviso se cumple; PICS no
     // vuelve a mencionar una app una vez retirada, asi que hay que preguntar aparte.

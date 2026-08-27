@@ -11,22 +11,19 @@
 # varias horas por su cuenta. Asi el cron solo tiene que acertar una vez cada
 # DURACION, no cada 15 minutos, y el grupo de concurrencia encadena la siguiente.
 #
-# Hay un tope deliberado: el trabajo se corta antes del barrido nocturno, que
-# comparte grupo de concurrencia y se quedaria esperando.
+# NO hay corte por hora. Lo hubo, para no hacer esperar al barrido de las 04:00 que
+# comparte grupo de concurrencia, y salio mal: el 27 de agosto una ejecucion arranco
+# a las 03:18 UTC, vio doce minutos hasta el corte, hizo UNA pasada y termino. Despues
+# el cron no volvio a disparar en 3 h 22 min y nos quedamos ciegos, que es justo lo
+# que las pasadas venian a evitar. Retrasar unas horas un barrido diario es inofensivo;
+# perder tres horas de vigilancia no. El barrido espera su turno en la cola.
 set -euo pipefail
 
 DURACION_MIN="${DURACION_MIN:-180}"
 INTERVALO_MIN="${INTERVALO_MIN:-15}"
-# Hora UTC a la que hay que haber terminado para no bloquear el barrido de las 04:00
-CORTE_UTC="${CORTE_UTC:-03:30}"
 
 ahora=$(date -u +%s)
 fin=$(( ahora + DURACION_MIN * 60 ))
-
-# el corte de esta noche: si ya paso, el de manana
-corte=$(date -u -d "today ${CORTE_UTC}" +%s)
-[ "$corte" -le "$ahora" ] && corte=$(date -u -d "tomorrow ${CORTE_UTC}" +%s)
-[ "$corte" -lt "$fin" ] && fin=$corte
 
 echo "== vigilancia hasta $(date -u -d "@${fin}" '+%H:%M:%S UTC') (pasadas cada ${INTERVALO_MIN} min) =="
 

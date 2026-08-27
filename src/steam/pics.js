@@ -88,10 +88,48 @@ export async function cambiosDesde(cursor, { ultimoCicloMs = null } = {}) {
  * @returns {Promise<Set<number>>}
  */
 /**
- * Ritmo medido de PICS: 12,7 changenumbers por minuto.
- * Es lo que permite traducir un changenumber a "hace tantos dias".
+ * Ritmo de PICS por defecto, en changenumbers por minuto.
+ *
+ * El 12,7 del spike inicial se quedaba corto un 60%: contrastado el 27 de agosto
+ * contra casos limpios (Astrobuilder, cambiado ~22:09 del 26 con cn 38359138, y los
+ * DLC de The Witcher 3, ~20:01 del 25 con cn 38327162) el ritmo real rondaba los 20,
+ * y la mediana sobre 46 eventos detectados por PICS daba 22. Con 12,7 las edades
+ * salian infladas 1,5x y el filtro de "30 dias" cortaba de hecho en 19.
+ *
+ * Solo se usa hasta que haya histórico propio: ver `ritmoDeCambios`.
  */
-export const CAMBIOS_POR_DIA = 12.7 * 60 * 24;
+export const RITMO_POR_DEFECTO = 20;
+
+/** Muestras mas antiguas que esto no cuentan para calcular el ritmo. */
+const HISTORIAL_MAX_MS = 30 * 24 * 60 * 60 * 1000;
+/** Por debajo de este arco no hay muestra suficiente y se usa el valor por defecto. */
+const ARCO_MINIMO_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * Ritmo real de PICS a partir de nuestras propias muestras `[ms, changenumber]`.
+ *
+ * Steam va a rafagas —medido: 4,6 cambios/min una noche tranquila y mas de 200/min
+ * durante una actualizacion masiva— asi que cualquier constante fija esta mal casi
+ * siempre. Con el histórico propio el promedio se corrige solo.
+ */
+export function ritmoDeCambios(historial = []) {
+  const corte = Date.now() - HISTORIAL_MAX_MS;
+  const m = historial.filter(([t, cn]) => t >= corte && cn > 0).sort((a, b) => a[0] - b[0]);
+  if (m.length < 2) return RITMO_POR_DEFECTO;
+
+  const [t0, cn0] = m[0];
+  const [t1, cn1] = m[m.length - 1];
+  if (t1 - t0 < ARCO_MINIMO_MS || cn1 <= cn0) return RITMO_POR_DEFECTO;
+
+  return (cn1 - cn0) / ((t1 - t0) / 60000);
+}
+
+/** Anade una muestra al histórico y lo poda. Devuelve el histórico nuevo. */
+export function anotarRitmo(historial = [], changenumber, ahora = Date.now()) {
+  if (!changenumber) return historial;
+  const corte = ahora - HISTORIAL_MAX_MS;
+  return [...historial.filter(([t]) => t >= corte), [ahora, changenumber]].slice(-2000);
+}
 
 /**
  * Dias transcurridos desde el ultimo cambio de cada app en PICS.
@@ -105,10 +143,13 @@ export const CAMBIOS_POR_DIA = 12.7 * 60 * 24;
  * fecha de retirada. Un juego retirado en febrero y parcheado la semana pasada
  * parecera reciente.
  *
+ * `ritmo` en changenumbers por minuto; sale de `ritmoDeCambios(estado.ritmo)`.
+ *
  * @returns {Promise<Map<number, number>>} appid -> dias (redondeados)
  */
-export async function antiguedadDeCambio(appids) {
+export async function antiguedadDeCambio(appids, ritmo = RITMO_POR_DEFECTO) {
   if (appids.length === 0) return new Map();
+  const porDia = ritmo * 60 * 24;
   return await conSesion(async (user) => {
     const actual = (await user.getProductChanges(0)).currentChangeNumber;
     const info = await user.getProductInfo(appids, [], true);
@@ -116,7 +157,7 @@ export async function antiguedadDeCambio(appids) {
     const salida = new Map();
     for (const [appid, p] of Object.entries(info.apps)) {
       if (!p.changenumber) continue;
-      salida.set(Number(appid), Math.round((actual - p.changenumber) / CAMBIOS_POR_DIA));
+      salida.set(Number(appid), Math.round((actual - p.changenumber) / porDia));
     }
     return salida;
   }, { timeoutMs: 180000 });

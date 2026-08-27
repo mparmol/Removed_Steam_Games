@@ -713,6 +713,8 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
 
   // ---- 10. Cerrar cursor --------------------------------------------------------
   if (cambios.actual) estado.cursor.changenumber = cambios.actual;
+  // una muestra por pasada: con ~12 al dia el ritmo real se calcula solo
+  estado.ritmo = pics.anotarRitmo(estado.ritmo ?? [], cambios.actual);
   estado.cursor.ultimo_ciclo = new Date().toISOString();
   estado.cursor.ventana_perdida = cambios.ventanaPerdida;
 
