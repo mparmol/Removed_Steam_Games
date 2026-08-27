@@ -25,6 +25,10 @@ INTERVALO_MIN="${INTERVALO_MIN:-15}"
 ahora=$(date -u +%s)
 fin=$(( ahora + DURACION_MIN * 60 ))
 
+# La marca la deja `cli.js` cuando PICS pierde la ventana. Se borra al empezar para
+# no arrastrar la de la ejecucion anterior.
+rm -f .ventana-perdida
+
 echo "== vigilancia hasta $(date -u -d "@${fin}" '+%H:%M:%S UTC') (pasadas cada ${INTERVALO_MIN} min) =="
 
 pasada=0
@@ -64,3 +68,10 @@ while :; do
     sleep "$espera"
   fi
 done
+
+# Si CUALQUIER pasada perdio la ventana de PICS hay que barrer, aunque las siguientes
+# fueran bien: lo que se perdio en ese hueco no vuelve a aparecer por PICS.
+if [ -f .ventana-perdida ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "ventana_perdida=true" >> "$GITHUB_OUTPUT"
+  echo "AVISO: alguna pasada perdio la ventana de PICS -> se encadena barrido"
+fi

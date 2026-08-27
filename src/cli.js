@@ -101,7 +101,14 @@ async function watch() {
 
   // lo consume el workflow para decidir si dispara el barrido de emergencia
   await escribirSalidaAccion({ ventana_perdida: resumen.pics?.ventanaPerdida === true, eventos: confirmados.length });
-  if (resumen.pics?.ventanaPerdida) console.log('AVISO: ventana de PICS perdida -> hace falta barrido');
+  if (resumen.pics?.ventanaPerdida) {
+    console.log('AVISO: ventana de PICS perdida -> hace falta barrido');
+    // Marca para `scripts/vigilar.sh`. Con varias pasadas por ejecucion, la salida
+    // que ve el workflow es la de la ULTIMA, y despues de la primera pasada el cursor
+    // ya esta al dia: la senal de "ventana perdida" se perdia por el camino y el
+    // barrido de emergencia no llegaba a dispararse nunca.
+    await writeFile('.ventana-perdida', new Date().toISOString());
+  }
 }
 
 // --- comandos por shard ----------------------------------------------------------

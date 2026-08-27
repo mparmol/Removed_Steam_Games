@@ -4,10 +4,16 @@
 // tanto en local (1,07 s) como desde un runner de GitHub (3 logins seguidos, 1129 /
 // 488 / 321 ms, sin rate limit por IP).
 //
-// TRAMPA IMPORTANTE: la ventana de histórico es de ~7.200 changenumbers (~9,5 h al
-// ritmo medido de 12,7/min) y al salirse de ella Steam NO da error: devuelve
-// {appChanges: [], packageChanges: []}, indistinguible de "no ha cambiado nada".
-// Por eso comprobamos el hueco a mano antes de fiarnos del resultado.
+// TRAMPA IMPORTANTE: la ventana de histórico es de ~7.200 changenumbers y al salirse
+// de ella Steam NO da error: devuelve {appChanges: [], packageChanges: []},
+// indistinguible de "no ha cambiado nada". Por eso comprobamos el hueco a mano antes
+// de fiarnos del resultado.
+//
+// El limite es un NUMERO de changenumbers, no un tiempo, y eso importa mucho mas de
+// lo que parecia: a ritmo normal (~20/min) los 5.000 de margen son unas 4 h, pero
+// durante una actualizacion masiva de Steam (medido: mas de 200/min) son 25 minutos.
+// El 27 de agosto, tras cinco horas sin ejecutarse la vigilancia, el hueco era de
+// 5.405 y PICS quedo ciego. La unica forma de recuperar lo perdido es el barrido.
 
 import SteamUser from 'steam-user';
 
