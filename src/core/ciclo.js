@@ -190,7 +190,11 @@ export async function ejecutarCiclo(estado, { registrar = console.log } = {}) {
       // seguia publicada no habia cambio y no se emitia NADA. Nova Slash (1896510) se
       // anuncio el 23 de agosto con el flag puesto y jamas llego al feed. Es
       // exactamente el preaviso que da valor a la app, asi que va por su propia rama.
-      if (porEditor.has(appid)) {
+      // La ventana de gracia tras el estreno tapa tambien esta rama: Ubisoft pone el
+      // flag de retirada en los pases de temporada el mismo dia que salen, y de ahi
+      // vinieron dos de los once falsos del 8 de septiembre (R6 Siege Battle Pass y
+      // el Pack de lanzamiento), ambos perfectamente a la venta.
+      if (porEditor.has(appid) && !conf?.recienLanzado) {
         // "aun en pie" es que TODAVIA SE PUEDA COMPRAR, no que la ficha siga colgada:
         // una pagina que no vende nada no es una ultima oportunidad de nada.
         const cumplido = conf ? clasificar(conf) : (ahora.comprable ? null : 'no_comprable');

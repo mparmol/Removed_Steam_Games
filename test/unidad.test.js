@@ -8,7 +8,7 @@ import { enlacesDe, crearEvento, deduplicar, esUrgente, topicDe } from '../src/c
 import { Limitador } from '../src/lib/http.js';
 import { dejaDeVerse, dejaDeVenderse, juegosDePaquetesRetirados } from '../src/core/ciclo.js';
 import { escribirApp, leerApp } from '../src/core/estado.js';
-import { clasificar, notaSteamDb } from '../src/steam/store.js';
+import { clasificar, notaSteamDb, interpretarItem } from '../src/steam/store.js';
 import { ritmoDeCambios, anotarRitmo, RITMO_POR_DEFECTO } from '../src/steam/pics.js';
 import { publicar } from '../src/core/feed.js';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -344,4 +344,55 @@ test('ritmo: anotar poda lo viejo y conserva lo reciente', () => {
   const historial = anotarRitmo([[viejo, 1]], 500)
   assert.deepEqual(historial.map((x) => x[1]), [500], 'la muestra de hace 40 dias se cae')
   assert.equal(anotarRitmo([[Date.now(), 1]], null).length, 1, 'sin changenumber no anota')
+})
+
+test('clasificar: un juego recien estrenado no es un juego retirado', () => {
+  // Antes de su fecha de estreno la app esta exenta y cuenta como comprable; al pasar
+  // la fecha la exencion cae y las opciones de compra tardan un rato en propagarse.
+  // El 8 de septiembre eso genero 11 falsos de 12 avisos dentro de las 72 h del
+  // lanzamiento, cuatro de ellos a los 0,0 h EXACTOS de salir el juego.
+  const recien = { retirado: false, visibleEn: ['ES', 'US', 'JP', 'CN'], comprableEn: [], recienLanzado: true }
+  assert.equal(clasificar(recien), null, 'acaba de salir: no hay nada que contar')
+
+  // pasada la ventana, el mismo estado si es noticia
+  assert.equal(clasificar({ ...recien, recienLanzado: false }), 'no_comprable')
+
+  // y desaparecer de todos los mercados sigue siendo una retirada aunque sea reciente
+  assert.equal(
+    clasificar({ retirado: true, visibleEn: [], comprableEn: [], recienLanzado: true }),
+    'retirado',
+  )
+})
+
+test('interpretarItem: la ventana de gracia se marca de verdad en el dato', () => {
+  // Esta prueba existe porque el arreglo de la ventana de gracia se escribio una vez
+  // en un bloque que ya no estaba donde yo creia: la edicion no se aplico, y la
+  // comprobacion "en vivo" dio verde por otro motivo (los juegos ya eran comprables).
+  const horas = (h) => Math.floor((Date.now() - h * 3600000) / 1000)
+
+  const recien = interpretarItem({
+    appid: 5096230, name: 'GunGlyph', visible: true, type: 0,
+    release: { steam_release_date: horas(2) }, purchase_options: [],
+  })
+  assert.equal(recien.lanzado, true)
+  assert.equal(recien.recienLanzado, true, 'salio hace 2 h: dentro de la gracia')
+
+  const viejo = interpretarItem({
+    appid: 2026300, name: 'Anvillage', visible: true, type: 0,
+    release: { steam_release_date: horas(24 * 30) }, purchase_options: [],
+  })
+  assert.equal(viejo.recienLanzado, false)
+  assert.equal(viejo.comprable, false, 'ficha viva y sin opciones de compra: el caso Anvillage')
+
+  // lo que aun no ha salido sigue exento, como siempre
+  const futuro = interpretarItem({
+    appid: 1, name: 'X', visible: true, type: 0,
+    release: { steam_release_date: horas(-48) }, purchase_options: [],
+  })
+  assert.equal(futuro.lanzado, false)
+  assert.equal(futuro.recienLanzado, false)
+  assert.equal(futuro.comprable, true)
+
+  // Steam responde sin appid a lo ya borrado
+  assert.equal(interpretarItem({ id: 0, visible: false }), null)
 })

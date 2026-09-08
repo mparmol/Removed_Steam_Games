@@ -84,6 +84,9 @@ export const PAISES_CONFIRMACION = ['ES', 'US', 'JP', 'CN'];
 /** El mercado desde el que compra el usuario: es el que decide que se le cuenta. */
 export const PAIS_USUARIO = 'ES';
 
+/** Cuanto dura la ventana de gracia posterior al estreno. Ver `clasificar`. */
+export const GRACIA_LANZAMIENTO_MS = 72 * 60 * 60 * 1000;
+
 /**
  * Traduce el resultado de `confirmarRetirada` a lo que hay que contarle al usuario.
  *
@@ -102,10 +105,90 @@ export function clasificar(conf) {
   if (conf.retirado) return 'retirado';
   // se puede comprar en nuestro mercado: no hay noticia
   if (conf.comprableEn.includes(PAIS_USUARIO)) return null;
+  // ACABA DE SALIR: no es que haya dejado de venderse, es que aun no ha empezado.
+  //
+  // Antes de su fecha de lanzamiento una app esta exenta y cuenta como comprable; en
+  // el instante en que la fecha pasa, la exencion cae y las opciones de compra aun
+  // tardan un rato en propagarse por los mercados. El detector leia esa ventana como
+  // "ha dejado de poder comprarse". Medido el 8 de septiembre: de 12 avisos dentro de
+  // las 72 h del lanzamiento, 11 eran falsos, y cuatro se emitieron a los 0,0 h
+  // exactos de salir el juego (GunGlyph, aMazeing 98, Honeycomb, Cat Me If You Can).
+  //
+  // Lo que de verdad se retira nada mas salir es rarisimo, y si lo esta el barrido lo
+  // pilla igual en cuanto pasa la ventana: se retrasa el aviso, no se pierde.
+  if (conf.recienLanzado) return null;
   if (conf.comprableEn.length === 0) return 'no_comprable';
   // el realm chino es una tienda aparte: que solo quede ahi no es una alternativa real
   if (conf.comprableEn.every((p) => p === 'CN')) return 'no_comprable';
   return 'bloqueo_regional';
+}
+
+/**
+ * Traduce UN item de GetItems a nuestro vocabulario.
+ *
+ * Vive aparte de `consultarLote` para poder probarse SIN RED: aqui se concentran
+ * casi todos los fallos que ha dado el proyecto (el tipo, `comprable`, la exencion
+ * de lo no estrenado, las promos al 100%, las resenas). El 8 de septiembre una
+ * edicion de este bloque no llego a aplicarse y no habia test que lo detectara.
+ *
+ * Devuelve null si el item no trae appid: asi responde Steam a lo ya borrado.
+ */
+export function interpretarItem(item) {
+  const appid = Number(item.appid ?? item.id);
+    if (!appid) return null;
+    const compra = item.best_purchase_option ?? item.purchase_options?.[0] ?? null;
+    const gratis = item.is_free === true;
+    // Promocion "quedatelo gratis": un juego de pago con 100% de descuento durante
+    // unas horas. No es lo mismo que `is_free` (eso es un free-to-play de siempre) y
+    // trae el plazo exacto, que es justo lo que hay que poner en la notificacion.
+    // Comprobado con Dokimon Quest (2019300): discount_pct 100, is_free_to_keep true,
+    // free_to_keep_ends 1787763600 = 26 ago 2026 19:00.
+    const opciones = item.purchase_options ?? (compra ? [compra] : []);
+    const promoGratis = opciones.find((o) => o.is_free_to_keep === true) ?? null;
+    // Un juego sin lanzar esta visible y SIN opciones de compra, igual que uno al que
+    // le han quitado el ultimo paquete. Hay 52.752 asi en la tienda, o sea que sin
+    // esta distincion el detector de "ya no se vende" seria un generador de ruido.
+    const tipo = normalizarTipo(item.type);
+    const lanzamiento = Number(item.release?.steam_release_date ?? 0);
+    const lanzado = lanzamiento > 0 && lanzamiento * 1000 < Date.now();
+    // Se captura como el precio, y por lo mismo: en cuanto la ficha desaparece,
+    // GetItems devuelve el item vacio y las resenas ya no hay forma de recuperarlas.
+    const resumen = item.reviews?.summary_filtered ?? null;
+    const resenas = Number(resumen?.review_count ?? 0);
+    const porcentaje = resenas > 0 ? Number(resumen?.percent_positive ?? 0) : null;
+    return {
+      appid,
+      // `visible: false` cubre tanto "retirado" como "nunca existio". No los distingue,
+      // y da igual: lo que detectamos es la TRANSICION visible -> no visible.
+      visible: item.visible === true,
+      nombre: item.name ?? '',
+      tipo,
+      gratis,
+      // con una promo al 100% el precio final es "0,00 €": lo que interesa guardar
+      // es lo que costaba, para poder decir cuanto te ahorras
+      precio: (promoGratis
+        ? promoGratis.formatted_original_price
+        : compra?.formatted_final_price ?? compra?.formatted_original_price) ?? null,
+      lanzado,
+      // Ventana de gracia tras el estreno: dentro de ella "sin opciones de compra" no
+      // significa retirado, significa que la tienda todavia se esta poblando.
+      recienLanzado: lanzado && Date.now() - lanzamiento * 1000 < GRACIA_LANZAMIENTO_MS,
+      // valoracion: el porcentaje crudo de Steam y la nota ponderada estilo SteamDB
+      porcentaje,
+      resenas,
+      nota: porcentaje == null ? null : notaSteamDb(porcentaje, resenas),
+      // se lo queda para siempre quien lo reclame antes de `gratisHasta`
+      promoGratis: promoGratis != null,
+      gratisHasta: promoGratis?.free_to_keep_ends
+        ? new Date(Number(promoGratis.free_to_keep_ends) * 1000).toISOString()
+        : null,
+      // Si le retiran el ultimo paquete, la pagina sigue viva pero no hay forma de
+      // comprarlo. Practicamente es una retirada, y mirar solo `visible` no lo ve.
+      // Caso real: Anvillage (2026300) visible=true con 0 opciones de compra.
+      // No aplica a lo que aun no ha salido ni a lo que nunca se vende.
+      comprable: !lanzado || NO_VENDIBLES.has(tipo) || gratis ||
+        (item.purchase_options?.length ?? 0) > 0 || item.best_purchase_option != null,
+    };
 }
 
 /**
@@ -129,58 +212,8 @@ export async function consultarLote(appids, limitador, pais = 'ES') {
 
   const salida = new Map();
   for (const item of res?.response?.store_items ?? []) {
-    const appid = Number(item.appid ?? item.id);
-    if (!appid) continue;
-    const compra = item.best_purchase_option ?? item.purchase_options?.[0] ?? null;
-    const gratis = item.is_free === true;
-    // Promocion "quedatelo gratis": un juego de pago con 100% de descuento durante
-    // unas horas. No es lo mismo que `is_free` (eso es un free-to-play de siempre) y
-    // trae el plazo exacto, que es justo lo que hay que poner en la notificacion.
-    // Comprobado con Dokimon Quest (2019300): discount_pct 100, is_free_to_keep true,
-    // free_to_keep_ends 1787763600 = 26 ago 2026 19:00.
-    const opciones = item.purchase_options ?? (compra ? [compra] : []);
-    const promoGratis = opciones.find((o) => o.is_free_to_keep === true) ?? null;
-    // Un juego sin lanzar esta visible y SIN opciones de compra, igual que uno al que
-    // le han quitado el ultimo paquete. Hay 52.752 asi en la tienda, o sea que sin
-    // esta distincion el detector de "ya no se vende" seria un generador de ruido.
-    const tipo = normalizarTipo(item.type);
-    const lanzamiento = Number(item.release?.steam_release_date ?? 0);
-    const lanzado = lanzamiento > 0 && lanzamiento * 1000 < Date.now();
-    // Se captura como el precio, y por lo mismo: en cuanto la ficha desaparece,
-    // GetItems devuelve el item vacio y las resenas ya no hay forma de recuperarlas.
-    const resumen = item.reviews?.summary_filtered ?? null;
-    const resenas = Number(resumen?.review_count ?? 0);
-    const porcentaje = resenas > 0 ? Number(resumen?.percent_positive ?? 0) : null;
-    salida.set(appid, {
-      appid,
-      // `visible: false` cubre tanto "retirado" como "nunca existio". No los distingue,
-      // y da igual: lo que detectamos es la TRANSICION visible -> no visible.
-      visible: item.visible === true,
-      nombre: item.name ?? '',
-      tipo,
-      gratis,
-      // con una promo al 100% el precio final es "0,00 €": lo que interesa guardar
-      // es lo que costaba, para poder decir cuanto te ahorras
-      precio: (promoGratis
-        ? promoGratis.formatted_original_price
-        : compra?.formatted_final_price ?? compra?.formatted_original_price) ?? null,
-      lanzado,
-      // valoracion: el porcentaje crudo de Steam y la nota ponderada estilo SteamDB
-      porcentaje,
-      resenas,
-      nota: porcentaje == null ? null : notaSteamDb(porcentaje, resenas),
-      // se lo queda para siempre quien lo reclame antes de `gratisHasta`
-      promoGratis: promoGratis != null,
-      gratisHasta: promoGratis?.free_to_keep_ends
-        ? new Date(Number(promoGratis.free_to_keep_ends) * 1000).toISOString()
-        : null,
-      // Si le retiran el ultimo paquete, la pagina sigue viva pero no hay forma de
-      // comprarlo. Practicamente es una retirada, y mirar solo `visible` no lo ve.
-      // Caso real: Anvillage (2026300) visible=true con 0 opciones de compra.
-      // No aplica a lo que aun no ha salido ni a lo que nunca se vende.
-      comprable: !lanzado || NO_VENDIBLES.has(tipo) || gratis ||
-        (item.purchase_options?.length ?? 0) > 0 || item.best_purchase_option != null,
-    });
+    const dato = interpretarItem(item);
+    if (dato) salida.set(dato.appid, dato);
   }
   return salida;
 }
@@ -233,6 +266,7 @@ export async function consultarPaquetes(packageids, limitador) {
 export async function confirmarRetirada(appids, limitador) {
   const visibleEn = new Map(appids.map((a) => [Number(a), []]));
   const comprableEn = new Map(appids.map((a) => [Number(a), []]));
+  const recienLanzado = new Set();
 
   for (const pais of PAISES_CONFIRMACION) {
     for (let i = 0; i < appids.length; i += LOTE_MAX) {
@@ -240,6 +274,8 @@ export async function confirmarRetirada(appids, limitador) {
       for (const [appid, dato] of res) {
         if (dato.visible) visibleEn.get(appid)?.push(pais);
         if (dato.comprable) comprableEn.get(appid)?.push(pais);
+        // la fecha de estreno no depende del pais: basta con verla una vez
+        if (dato.recienLanzado) recienLanzado.add(appid);
       }
     }
   }
@@ -253,6 +289,7 @@ export async function confirmarRetirada(appids, limitador) {
       // visible en algun sitio pero sin forma de comprarlo en ninguno
       soloEscaparate: paises.length > 0 && compra.length === 0,
       comprableEn: compra,
+      recienLanzado: recienLanzado.has(appid),
     });
   }
   return salida;
