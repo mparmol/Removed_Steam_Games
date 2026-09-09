@@ -79,12 +79,29 @@ object Topics {
     }
 
     /**
-     * Version bloqueante para `MensajeriaService`, que recibe el push en un callback
-     * normal y tiene que decidir en el acto si lo muestra. Ya corre en un hilo de
-     * fondo de Firebase, asi que bloquear ahi no congela nada.
+     * ¿Se muestra esta notificación? Misma regla que `visible`, para que lo que suena
+     * y lo que se ve en la lista no se contradigan.
+     *
+     * OJO con los preavisos: son TRANSVERSALES. La primera versión de este filtro
+     * miraba solo el tipo de contenido y se cargaba los "van a retirarlo" de DLC,
+     * software y otros — 11 de los 46 avisos de RemGC quedaban mudos en el móvil
+     * aunque sí aparecían en la lista, que es justo la contradicción que se queria
+     * evitar. Un preaviso es la única oportunidad de comprar algo: no se silencia
+     * por ser de una categoría poco interesante.
+     *
+     * Es bloqueante a proposito: `MensajeriaService` recibe el push en un callback
+     * normal y decide en el acto. Ya corre en un hilo de fondo de Firebase.
      */
-    fun contenidoActivo(ctx: Context, contenido: String): Boolean = runCatching {
-        runBlocking { contenidosActivos(ctx).first() }.contains(contenido)
+    fun debeNotificar(ctx: Context, tipo: String, contenido: String?): Boolean = runCatching {
+        runBlocking {
+            when (tipo) {
+                // el volumen alto: se corta por tipo de contenido
+                "retirado", "no_comprable", "resumen" ->
+                    contenido == null || contenidosActivos(ctx).first().contains(contenido)
+                // preavisos y juegos gratis: mandan siempre, sea del contenido que sea
+                else -> EVENTOS.none { it.id == tipo } || eventosActivos(ctx).first().contains(tipo)
+            }
+        }
     }.getOrDefault(true)
 
     suspend fun cambiarEvento(ctx: Context, id: String, activo: Boolean) {

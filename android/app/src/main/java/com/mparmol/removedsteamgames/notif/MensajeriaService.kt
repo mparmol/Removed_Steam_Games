@@ -9,6 +9,9 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.mparmol.removedsteamgames.MainActivity
 import com.mparmol.removedsteamgames.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * Construye la notificacion en el cliente a partir del payload de datos, en vez de
@@ -21,12 +24,11 @@ class MensajeriaService : FirebaseMessagingService() {
         val datos = mensaje.data
         val tipo = datos["tipo"] ?: "resumen"
 
-        // Cinturon y tirantes: si el contenido esta silenciado no se muestra nada,
-        // aunque la suscripcion haya quedado desfasada. Un aviso que lleva a una lista
-        // vacia es peor que no avisar.
-        val contenido = datos["app_type"]
-        if (contenido != null && !Topics.contenidoActivo(this, contenido)) {
-            android.util.Log.i("Mensajeria", "silenciado por contenido: $contenido")
+        // Cinturon y tirantes por si una suscripcion queda desfasada. Usa la MISMA
+        // regla que la lista, asi que los preavisos pasan siempre: filtrarlos por tipo
+        // de contenido dejaba mudos los "van a retirarlo" de DLC y software.
+        if (!Topics.debeNotificar(this, tipo, datos["app_type"])) {
+            android.util.Log.i("Mensajeria", "silenciado: $tipo / ${datos["app_type"]}")
             return
         }
 
@@ -95,8 +97,17 @@ class MensajeriaService : FirebaseMessagingService() {
         else -> "Retirado de Steam"
     }
 
+    /**
+     * Al renovarse el token hay que rehacer las suscripciones a topics.
+     *
+     * Esto estaba VACIO, con un comentario que decia que Firebase las reaplicaba solo.
+     * Cuando no lo hace, el backend sigue publicando, FCM acepta el envio a un topic
+     * sin suscriptores sin dar error, y al movil deja de llegar nada: un fallo mudo y
+     * permanente hasta el siguiente arranque de la app.
+     */
     override fun onNewToken(token: String) {
-        // Al renovarse el token hay que rehacer las suscripciones a topics.
-        // Firebase las reaplica solo, pero forzamos por si acaso en el proximo arranque.
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching { Topics.sincronizar(applicationContext) }
+        }
     }
 }
