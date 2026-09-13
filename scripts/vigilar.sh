@@ -32,33 +32,48 @@ rm -f .ventana-perdida
 echo "== vigilancia hasta $(date -u -d "@${fin}" '+%H:%M:%S UTC') (pasadas cada ${INTERVALO_MIN} min) =="
 
 pasada=0
+ok=0
+fallos=0
 while :; do
   pasada=$(( pasada + 1 ))
   inicio=$(date -u +%s)
   echo ""
   echo "---- pasada ${pasada}  $(date -u '+%H:%M:%S UTC') ----"
 
-  # Se vuelve a traer el feed en CADA pasada. Ademas de partir siempre de lo
-  # publicado, deja `feedrepo` recien clonado: `feed-publicar.sh` crea una rama
-  # huerfana `publicacion` y en la segunda pasada chocaria con la de la primera.
-  bash scripts/feed-preparar.sh
+  # UNA pasada que falla NO puede llevarse por delante la ejecucion entera. El 13 de
+  # septiembre la 526 murio a los 141 minutos y, como el cron no volvio a disparar, el
+  # sistema se quedo parado hora y media: en ese hueco se anuncio la retirada de Sun
+  # Ultimate War y no se entero nadie. Perder una pasada cuesta 15 minutos; perder la
+  # ejecucion cuesta lo que tarde el cron en acordarse, que hoy son horas.
+  if (
+    set -e
+    # Se vuelve a traer el feed en CADA pasada. Ademas de partir siempre de lo
+    # publicado, deja `feedrepo` recien clonado: `feed-publicar.sh` crea una rama
+    # huerfana y en la segunda pasada chocaria con la de la primera.
+    bash scripts/feed-preparar.sh
 
-  node src/cli.js watch --remoto
+    node src/cli.js watch --remoto
 
-  # El notificador va ANTES de publicar el feed: deja constancia de lo enviado en
-  # notificados.json, y publicando primero esa anotacion se perderia.
-  if [ -n "${FCM_SERVICE_ACCOUNT:-}" ]; then
-    set -o pipefail
-    node src/notificar.js 2>&1 | tee -a notificar.log
+    # El notificador va ANTES de publicar el feed: deja constancia de lo enviado en
+    # notificados.json, y publicando primero esa anotacion se perderia.
+    if [ -n "${FCM_SERVICE_ACCOUNT:-}" ]; then
+      set -o pipefail
+      node src/notificar.js 2>&1 | tee -a notificar.log
+    fi
+
+    bash scripts/feed-publicar.sh
+  ); then
+    ok=$(( ok + 1 ))
+  else
+    fallos=$(( fallos + 1 ))
+    echo "AVISO: la pasada ${pasada} ha fallado; se continua con la siguiente" | tee -a publicar.log
   fi
-
-  bash scripts/feed-publicar.sh
 
   # ¿cabe otra pasada entera antes del corte?
   siguiente=$(( inicio + INTERVALO_MIN * 60 ))
   if [ "$siguiente" -ge "$fin" ]; then
     echo ""
-    echo "== fin: ${pasada} pasadas =="
+    echo "== fin: ${pasada} pasadas (${ok} bien, ${fallos} con fallo) =="
     break
   fi
 
@@ -74,4 +89,15 @@ done
 if [ -f .ventana-perdida ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "ventana_perdida=true" >> "$GITHUB_OUTPUT"
   echo "AVISO: alguna pasada perdio la ventana de PICS -> se encadena barrido"
+fi
+
+# El job solo se marca en rojo si NINGUNA pasada salio adelante. Con alguna buena, el
+# feed esta publicado y al dia: avisar de un fallo transitorio solo entrena a ignorar
+# los correos.
+if [ "$ok" -eq 0 ]; then
+  echo "ERROR: las ${pasada} pasadas han fallado" >&2
+  exit 1
+fi
+if [ "$fallos" -gt 0 ]; then
+  echo "hubo ${fallos} pasadas con fallo de ${pasada}, pero ${ok} salieron adelante"
 fi
