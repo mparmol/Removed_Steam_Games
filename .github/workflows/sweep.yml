@@ -96,15 +96,18 @@ jobs:
           set -o pipefail
           node src/notificar.js 2>&1 | tee notificar.log
 
+
+      - name: Publicar feed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/feed-publicar.sh
+
       # Los logs de Actions dan 403 incluso en repos publicos, asi que el fallo
       # se publica en la rama data para poder diagnosticarlo sin capturas.
       - name: Publicar log si falla
         if: failure()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/publicar-log.sh notificar.log ${{ github.workflow }}
-
-      - name: Publicar feed
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/feed-publicar.sh
+        run: |
+          cat notificar.log publicar.log 2>/dev/null > fallo.log || true
+          bash scripts/publicar-log.sh fallo.log ${{ github.workflow }}

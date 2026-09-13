@@ -61,7 +61,10 @@ jobs:
         if: failure()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/publicar-log.sh notificar.log ${{ github.workflow }}
+        run: |
+          cat notificar.log publicar.log 2>/dev/null > fallo.log || true
+          bash scripts/publicar-log.sh fallo.log ${{ github.workflow }}
+
 
   # Si PICS perdio la ventana, el barrido es la unica forma de saber que nos hemos
   # perdido: Steam devuelve listas vacias sin avisar, no da error.
