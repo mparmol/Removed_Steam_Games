@@ -36,12 +36,22 @@ export class Limitador {
 export const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * GET con reintentos. Trata 429 y 5xx como recuperables con backoff exponencial.
+ * Tope por intento, cabeceras y cuerpo incluidos. Sin el, `fetch` espera lo que dicte
+ * undici, que son 5 min para las cabeceras y otros 5 para el cuerpo: con 4 intentos
+ * y ~130 peticiones por pasada, una red atascada convertia una pasada de 5 min en
+ * horas. El 30 de octubre la 790 se paso del limite del job (200 min) sin dejar log.
+ * Lo mas lento que se pide son los lotes de 200 apps de GetItems: segundos, no minutos.
+ */
+const TIMEOUT_MS = 60000;
+
+/**
+ * GET con reintentos. Trata 429, 5xx y los timeouts como recuperables con backoff
+ * exponencial.
  * @param {string} url
- * @param {{limitador?: Limitador, intentos?: number, headers?: object, comoTexto?: boolean}} opciones
+ * @param {{limitador?: Limitador, intentos?: number, headers?: object, comoTexto?: boolean, timeoutMs?: number}} opciones
  */
 export async function pedir(url, opciones = {}) {
-  const { limitador, intentos = 4, headers = {}, comoTexto = false } = opciones;
+  const { limitador, intentos = 4, headers = {}, comoTexto = false, timeoutMs = TIMEOUT_MS } = opciones;
 
   let ultimoError = null;
   for (let intento = 0; intento < intentos; intento++) {
@@ -49,15 +59,19 @@ export async function pedir(url, opciones = {}) {
 
     let res;
     try {
-      res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'es-ES,es;q=0.9', ...headers } });
+      res = await fetch(url, {
+        headers: { 'User-Agent': UA, 'Accept-Language': 'es-ES,es;q=0.9', ...headers },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.status === 200) {
+        // el cuerpo tambien va bajo la misma senal: dentro del try para que un
+        // cuerpo atascado se reintente igual que una conexion atascada
+        return comoTexto ? await res.text() : await res.json();
+      }
     } catch (e) {
       ultimoError = e;
       await dormir(1000 * 2 ** intento);
       continue;
-    }
-
-    if (res.status === 200) {
-      return comoTexto ? await res.text() : await res.json();
     }
 
     if (res.status === 429 || res.status >= 500) {

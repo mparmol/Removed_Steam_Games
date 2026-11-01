@@ -53,16 +53,22 @@ jobs:
           DIR_FEED: feedrepo/feed
           DURACION_MIN: '180'
           INTERVALO_MIN: '15'
-        run: bash scripts/vigilar.sh
+          TOPE_PASADA_MIN: '12'
+        # `shell: bash` activa pipefail: sin el, el `tee` taparia el exit de vigilar.sh
+        shell: bash
+        run: bash scripts/vigilar.sh 2>&1 | tee vigilar.log
 
       # Los logs de Actions dan 403 incluso en repos publicos, asi que el fallo
       # se publica en la rama data para poder diagnosticarlo sin capturas.
+      # `cancelled()` tambien: el 30 de octubre la 790 murio por el timeout del job, que
+      # cuenta como cancelacion, y se quedo sin log. Y de una cancelacion Actions no
+      # guarda log de un paso que no llego a terminar: este era el unico rastro posible.
       - name: Publicar log si falla
-        if: failure()
+        if: failure() || cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cat notificar.log publicar.log 2>/dev/null > fallo.log || true
+          cat vigilar.log notificar.log publicar.log 2>/dev/null > fallo.log || true
           bash scripts/publicar-log.sh fallo.log ${{ github.workflow }}
 
 
