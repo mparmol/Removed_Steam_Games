@@ -5,12 +5,18 @@ name: Vigilancia
 # 177 min. Dentro de ese hueco se retiro Astrobuilder y el aviso llego dos horas tarde.
 #
 # Por eso cada ejecucion hace VARIAS pasadas por su cuenta (ver scripts/vigilar.sh):
-# el cron solo tiene que acertar una vez cada tres horas en vez de cada quince minutos.
-# Se mantiene el '*/15' porque el grupo de concurrencia descarta lo que sobra y asi la
+# el cron solo tiene que acertar una vez cada 5,5 horas en vez de cada quince minutos.
+# Se dispara cada 15 min porque el grupo de concurrencia descarta lo que sobra y asi la
 # siguiente ejecucion entra en cuanto termina la anterior.
+#
+# Con 3 h no bastaba: del 1 al 6 de noviembre solo hubo vigilancia el 45% del tiempo.
+# El cron paso hasta 7,4 h sin disparar y en 8 de 17 ejecuciones PICS ya habia perdido
+# la ventana al arrancar. Ahora cada ejecucion dura 5,5 h, y los minutos evitan el :00:
+# segun la documentacion de GitHub es el momento de mas carga, en el que los eventos
+# de `schedule` se retrasan y, si la carga es alta, se descartan.
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -26,8 +32,9 @@ concurrency:
 jobs:
   ciclo:
     runs-on: ubuntu-latest
-    # Tres horas de pasadas + margen. El tope de un job son 6 h.
-    timeout-minutes: 200
+    # 5,5 h de pasadas + margen. El tope de un job son 6 h: lo peor posible son 328 min
+    # (ver TOPE_PASADA_MIN en vigilar.sh), asi que 350 deja aire sin rozar el limite.
+    timeout-minutes: 350
     outputs:
       ventana_perdida: ${{ steps.ciclo.outputs.ventana_perdida }}
     # El contexto `secrets` NO existe dentro de un `if:` de step (solo `env`), asi que
@@ -51,7 +58,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DIR_FEED: feedrepo/feed
-          DURACION_MIN: '180'
+          DURACION_MIN: '330'
           INTERVALO_MIN: '15'
           TOPE_PASADA_MIN: '12'
         # `shell: bash` activa pipefail: sin el, el `tee` taparia el exit de vigilar.sh

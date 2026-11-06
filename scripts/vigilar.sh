@@ -19,15 +19,16 @@
 # perder tres horas de vigilancia no. El barrido espera su turno en la cola.
 set -euo pipefail
 
-DURACION_MIN="${DURACION_MIN:-180}"
+DURACION_MIN="${DURACION_MIN:-330}"
 INTERVALO_MIN="${INTERVALO_MIN:-15}"
 # Tope DURO por pasada. Medido sobre 204 pasadas (17 ejecuciones, 25 oct - 1 nov):
 # entre 5,2 y 5,5 min todas. El 30 de octubre la 790 se paso de los 200 min del job:
 # alguna pasada se quedo colgada mas de media hora y Actions mato el job entero, sin
 # log (un job cancelado no dispara `if: failure()`) y con PICS perdiendo la ventana
 # en el hueco. Una pasada colgada debe costar una pasada, no la ejecucion.
-# Con la ultima pasada arrancando como tarde en DURACION - INTERVALO, el job acaba
-# como mucho en DURACION - INTERVALO + TOPE = 177 min: por debajo de los 200.
+# Con la ultima pasada arrancando como tarde en DURACION - INTERVALO, el paso acaba
+# como mucho en DURACION - INTERVALO + TOPE + 30 s = 328 min: por debajo de los 350
+# de `timeout-minutes` y de las 6 h que GitHub permite a un job.
 TOPE_PASADA_MIN="${TOPE_PASADA_MIN:-12}"
 
 # Una pasada en su propio proceso, para poder cortarla con `timeout`. Ademas arregla

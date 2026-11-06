@@ -7,7 +7,9 @@ name: Barrido
 # 12 shards en paralelo baja a unos minutos.
 on:
   schedule:
-    - cron: '0 4 * * *'
+    # Fuera del :00 por lo mismo que Vigilancia: a las 04:00 el evento llegaba entre
+    # las 08:00 y las 11:50, de 4 a 8 horas tarde.
+    - cron: '23 4 * * *'
   workflow_dispatch:
   workflow_call:
     inputs:
