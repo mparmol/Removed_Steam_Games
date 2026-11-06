@@ -93,6 +93,16 @@ async function watch() {
 
   if (seco) return console.log('\n(dry run: no se guarda estado ni feed)');
 
+  // Marca para `scripts/vigilar.sh`. Con varias pasadas por ejecucion, la salida que
+  // ve el workflow es la de la ULTIMA, y despues de la primera pasada el cursor ya
+  // esta al dia: la senal de "ventana perdida" se perdia por el camino y el barrido
+  // de emergencia no llegaba a dispararse nunca.
+  // Va ANTES de subir nada. El 4 de noviembre la 811 perdio la ventana en la pasada 1
+  // y la subida del estado devolvio un 502 que la tumbo, pero el estado SI llego a
+  // subirse: la pasada 2 ya partio del cursor nuevo y no vio nada raro. La marca se
+  // escribia despues, asi que nunca se escribio y no hubo barrido de emergencia.
+  if (resumen.pics?.ventanaPerdida) await writeFile('.ventana-perdida', new Date().toISOString());
+
   const confirmados = eventos.filter((e) => e.confianza === 'confirmado');
   const pub = await publicar(confirmados);
   if (enFrio) await marcarComoNotificados(confirmados);
@@ -101,14 +111,7 @@ async function watch() {
 
   // lo consume el workflow para decidir si dispara el barrido de emergencia
   await escribirSalidaAccion({ ventana_perdida: resumen.pics?.ventanaPerdida === true, eventos: confirmados.length });
-  if (resumen.pics?.ventanaPerdida) {
-    console.log('AVISO: ventana de PICS perdida -> hace falta barrido');
-    // Marca para `scripts/vigilar.sh`. Con varias pasadas por ejecucion, la salida
-    // que ve el workflow es la de la ULTIMA, y despues de la primera pasada el cursor
-    // ya esta al dia: la senal de "ventana perdida" se perdia por el camino y el
-    // barrido de emergencia no llegaba a dispararse nunca.
-    await writeFile('.ventana-perdida', new Date().toISOString());
-  }
+  if (resumen.pics?.ventanaPerdida) console.log('AVISO: ventana de PICS perdida -> hace falta barrido');
 }
 
 // --- comandos por shard ----------------------------------------------------------
