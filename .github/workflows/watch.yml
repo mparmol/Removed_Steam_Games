@@ -31,7 +31,12 @@ concurrency:
 
 jobs:
   ciclo:
-    runs-on: ubuntu-latest
+    # Fijada a 24.04. `ubuntu-latest` paso a 26.04 el 29 de octubre (run 787) y desde
+    # entonces van 4 incidencias del runner en ~55 ejecuciones: la 790 colgada hasta
+    # el timeout, un "internal error" en la 800 y "the hosted runner lost communication"
+    # en la 818 y la 840, las dos muertas entre pasadas, sin nada nuestro corriendo.
+    # En 24.04 hubo ~350 ejecuciones largas (26 ago - 29 oct) sin ni una.
+    runs-on: ubuntu-24.04
     # 5,5 h de pasadas + margen. El tope de un job son 6 h: lo peor posible son 328 min
     # (ver TOPE_PASADA_MIN en vigilar.sh), asi que 350 deja aire sin rozar el limite.
     timeout-minutes: 350
